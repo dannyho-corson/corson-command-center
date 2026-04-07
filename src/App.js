@@ -3,17 +3,32 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import './App.css';
 import ArtistList from './pages/ArtistList';
 import ArtistDetail from './pages/ArtistDetail';
+import Pipeline from './pages/Pipeline';
 import Nav from './components/Nav';
 import { supabase } from './lib/supabase';
 
-// ── STATIC URGENT ISSUES (no DB table yet) ───────────────────────────────────
-const URGENT_ISSUES = [
-  { severity: 'red', label: 'CONFLICT', artist: 'CLAWZ', artistSlug: 'clawz', issue: 'Buyer pushing LA show June 12 — VIOLATES EDC LV radius clause (active until Aug 15). Reject immediately.' },
-  { severity: 'red', label: 'OVERDUE', artist: 'SHOGUN', artistSlug: 'shogun', issue: 'Domicile Miami contract unsigned — 72-hr deadline passed 2 days ago. Chase buyer now.' },
-  { severity: 'yellow', label: 'FOLLOW UP', artist: 'MAD DOG', artistSlug: 'mad-dog', issue: 'NYC offer at $3,500 — below floor of $4,000. Counter or decline pending artist approval.' },
-  { severity: 'yellow', label: 'FOLLOW UP', artist: 'JUNKIE KID', artistSlug: 'junkie-kid', issue: 'Tomorrowland routing — need HGR details from VEOP by EOD for festival advance.' },
-  { severity: 'yellow', label: 'ACTION', artist: 'DRAKK', artistSlug: 'drakk', issue: 'Buyer communicated offer via WhatsApp only. Push to email — nothing is real until written offer received.' },
+// ── URGENT ISSUES SEED DATA ───────────────────────────────────────────────────
+// Source of truth. Resolved state is persisted to Supabase (urgent_issues table)
+// if the table exists; otherwise falls back to localStorage.
+// Run sql/migrations.sql in the Supabase SQL editor to enable DB persistence.
+const SEED_ISSUES = [
+  { id: 'ui-1', severity: 'red',    label: 'CONFLICT',   artist: 'CLAWZ',     artistSlug: 'clawz',     issue: 'Buyer pushing LA show June 12 — VIOLATES EDC LV radius clause (active until Aug 15). Reject immediately.' },
+  { id: 'ui-2', severity: 'red',    label: 'OVERDUE',    artist: 'SHOGUN',    artistSlug: 'shogun',    issue: 'Domicile Miami contract unsigned — 72-hr deadline passed 2 days ago. Chase buyer now.' },
+  { id: 'ui-3', severity: 'yellow', label: 'FOLLOW UP',  artist: 'MAD DOG',   artistSlug: 'mad-dog',   issue: 'NYC offer at $3,500 — below floor of $4,000. Counter or decline pending artist approval.' },
+  { id: 'ui-4', severity: 'yellow', label: 'FOLLOW UP',  artist: 'JUNKIE KID',artistSlug: 'junkie-kid',issue: 'Tomorrowland routing — need HGR details from VEOP by EOD for festival advance.' },
+  { id: 'ui-5', severity: 'yellow', label: 'ACTION',     artist: 'DRAKK',     artistSlug: 'drakk',     issue: 'Buyer communicated offer via WhatsApp only. Push to email — nothing is real until written offer received.' },
 ];
+
+const LS_KEY = 'ccc_resolved_issues';
+
+function loadResolvedFromLS() {
+  try { return new Set(JSON.parse(localStorage.getItem(LS_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+
+function saveResolvedToLS(set) {
+  localStorage.setItem(LS_KEY, JSON.stringify([...set]));
+}
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 function stageColor(stage) {
@@ -106,7 +121,11 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const urgentIssues = URGENT_ISSUES;
+  // Resolved issues — persisted to Supabase if table exists, else localStorage
+  const [resolvedIds, setResolvedIds] = useState(() => loadResolvedFromLS());
+  const [resolving, setResolving] = useState(null); // id being resolved
+
+  const urgentIssues = SEED_ISSUES.filter((i) => !resolvedIds.has(i.id));
 
   useEffect(() => {
     async function load() {
@@ -186,7 +205,28 @@ function Dashboard() {
       }
     }
     load();
-  }, [urgentIssues.length]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleResolve(issue) {
+    setResolving(issue.id);
+    // Optimistic update
+    const next = new Set(resolvedIds);
+    next.add(issue.id);
+    setResolvedIds(next);
+    saveResolvedToLS(next);
+
+    // Try Supabase (works once sql/migrations.sql has been run)
+    try {
+      await supabase
+        .from('urgent_issues')
+        .update({ resolved: true })
+        .eq('artist_slug', issue.artistSlug)
+        .eq('label', issue.label);
+    } catch {
+      // Table may not exist yet — localStorage already saved it
+    }
+    setResolving(null);
+  }
 
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', {
@@ -229,12 +269,19 @@ function Dashboard() {
         <section className="mb-8">
           <div className="flex items-center gap-2 mb-4">
             <h3 className="text-lg font-bold text-white">Urgent Issues</h3>
-            <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-              {urgentIssues.length}
-            </span>
+            {urgentIssues.length > 0 && (
+              <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                {urgentIssues.length}
+              </span>
+            )}
           </div>
 
           <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+            {urgentIssues.length === 0 && (
+              <div className="px-5 py-8 text-center">
+                <p className="text-emerald-400 text-sm font-semibold">All clear — no urgent issues.</p>
+              </div>
+            )}
             {urgentIssues.map((item, i) => (
               <div
                 key={i}
@@ -260,13 +307,15 @@ function Dashboard() {
                   <p className="text-gray-400 text-sm leading-relaxed">{item.issue}</p>
                 </div>
                 <button
-                  className={`flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
+                  onClick={() => handleResolve(item)}
+                  disabled={resolving === item.id}
+                  className={`flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     item.severity === 'red'
                       ? 'border-red-600 text-red-400 hover:bg-red-600 hover:text-white'
                       : 'border-yellow-600 text-yellow-400 hover:bg-yellow-600 hover:text-white'
                   }`}
                 >
-                  Resolve
+                  {resolving === item.id ? '…' : 'Resolve'}
                 </button>
               </div>
             ))}
@@ -351,6 +400,7 @@ function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/artists" element={<ArtistList />} />
         <Route path="/artists/:slug" element={<ArtistDetail />} />
+        <Route path="/pipeline" element={<Pipeline />} />
       </Routes>
     </BrowserRouter>
   );
