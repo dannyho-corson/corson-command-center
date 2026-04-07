@@ -1,4 +1,8 @@
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import './App.css';
+import ArtistList from './pages/ArtistList';
+import ArtistDetail from './pages/ArtistDetail';
+import Nav from './components/Nav';
 
 // ── KPI DATA ──────────────────────────────────────────────────────────────────
 const kpis = [
@@ -38,6 +42,7 @@ const urgentIssues = [
     severity: 'red',
     label: 'CONFLICT',
     artist: 'CLAWZ',
+    artistSlug: 'clawz',
     issue:
       'Buyer pushing LA show June 12 — VIOLATES EDC LV radius clause (active until Aug 15). Reject immediately.',
   },
@@ -45,6 +50,7 @@ const urgentIssues = [
     severity: 'red',
     label: 'OVERDUE',
     artist: 'SHOGUN',
+    artistSlug: 'shogun',
     issue:
       'Domicile Miami contract unsigned — 72-hr deadline passed 2 days ago. Chase buyer now.',
   },
@@ -52,6 +58,7 @@ const urgentIssues = [
     severity: 'yellow',
     label: 'FOLLOW UP',
     artist: 'MAD DOG',
+    artistSlug: 'mad-dog',
     issue:
       'NYC offer at $3,500 — below floor of $4,000. Counter or decline pending artist approval.',
   },
@@ -59,6 +66,7 @@ const urgentIssues = [
     severity: 'yellow',
     label: 'FOLLOW UP',
     artist: 'JUNKIE KID',
+    artistSlug: 'junkie-kid',
     issue:
       'Tomorrowland routing — need HGR details from VEOP by EOD for festival advance.',
   },
@@ -66,6 +74,7 @@ const urgentIssues = [
     severity: 'yellow',
     label: 'ACTION',
     artist: 'DRAKK',
+    artistSlug: 'drakk',
     issue:
       'Buyer communicated offer via WhatsApp only. Push to email — nothing is real until written offer received.',
   },
@@ -75,6 +84,7 @@ const urgentIssues = [
 const pipeline = [
   {
     artist: 'CLAWZ',
+    artistSlug: 'clawz',
     event: 'EDC Las Vegas — Wasteland',
     date: 'May 16–18, 2026',
     buyer: 'Insomniac',
@@ -84,6 +94,7 @@ const pipeline = [
   },
   {
     artist: 'HELLBOUND!',
+    artistSlug: 'hellbound',
     event: 'Vancouver — Kayzo Support',
     date: 'Jun 2026',
     buyer: 'Independent',
@@ -93,6 +104,7 @@ const pipeline = [
   },
   {
     artist: 'SHOGUN',
+    artistSlug: 'shogun',
     event: 'Ground Zero Miami',
     date: 'Jul 4, 2026',
     buyer: 'Domicile Miami',
@@ -102,6 +114,7 @@ const pipeline = [
   },
   {
     artist: 'MAD DOG',
+    artistSlug: 'mad-dog',
     event: 'New York City Club',
     date: 'Aug 2026',
     buyer: 'Bunker NYC',
@@ -111,6 +124,7 @@ const pipeline = [
   },
   {
     artist: 'ANIME',
+    artistSlug: 'anime',
     event: 'Dallas Hard Techno Festival',
     date: 'Sep 2026',
     buyer: 'Trinity / Sxtcy',
@@ -120,6 +134,7 @@ const pipeline = [
   },
   {
     artist: 'JUNKIE KID',
+    artistSlug: 'junkie-kid',
     event: 'Tomorrowland',
     date: 'Jul 2026',
     buyer: 'Tomorrowland NV',
@@ -129,6 +144,7 @@ const pipeline = [
   },
   {
     artist: 'DRAKK',
+    artistSlug: 'drakk',
     event: 'San Francisco Warehouse',
     date: 'May 2026',
     buyer: 'Bounce SF',
@@ -138,6 +154,7 @@ const pipeline = [
   },
   {
     artist: 'MORELIA',
+    artistSlug: 'morelia',
     event: 'London Underground',
     date: 'Jun 2026',
     buyer: 'UK Promoter',
@@ -147,6 +164,7 @@ const pipeline = [
   },
   {
     artist: 'TRIPTYKH',
+    artistSlug: 'triptykh',
     event: 'Denver Hard Techno',
     date: 'Aug 2026',
     buyer: 'Local Promoter',
@@ -156,6 +174,7 @@ const pipeline = [
   },
   {
     artist: 'DR. GRECO',
+    artistSlug: 'dr-greco',
     event: 'Miami Avail Check',
     date: 'Oct 2026',
     buyer: 'Domicile Miami',
@@ -231,8 +250,8 @@ function KpiCard({ kpi }) {
   );
 }
 
-// ── APP ───────────────────────────────────────────────────────────────────────
-function App() {
+// ── DASHBOARD ─────────────────────────────────────────────────────────────────
+function Dashboard() {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -243,43 +262,8 @@ function App() {
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: '#111827' }}>
+      <Nav />
 
-      {/* ── TOP NAV ── */}
-      <nav className="bg-gray-900 border-b border-gray-800 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-              style={{ backgroundColor: '#6366F1' }}
-            >
-              <span className="text-white font-bold text-sm">CC</span>
-            </div>
-            <div>
-              <h1 className="text-white font-bold text-lg tracking-widest uppercase">
-                Corson Command Center
-              </h1>
-              <p className="text-gray-500 text-xs tracking-wide">
-                Corson Agency · Hard Techno Division
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="text-right hidden sm:block">
-              <p className="text-white text-sm font-semibold">Danny Ho</p>
-              <p className="text-gray-500 text-xs">dho@corsonagency.com</p>
-            </div>
-            <div
-              className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm text-white flex-shrink-0"
-              style={{ backgroundColor: '#6366F1' }}
-            >
-              DH
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* ── MAIN CONTENT ── */}
       <main className="max-w-7xl mx-auto px-6 py-8">
 
         {/* Page Header */}
@@ -310,31 +294,25 @@ function App() {
                 key={i}
                 className={`flex items-start gap-4 px-5 py-4 ${
                   i < urgentIssues.length - 1 ? 'border-b border-gray-800' : ''
-                } ${
-                  item.severity === 'red'
-                    ? 'bg-red-950/20'
-                    : 'bg-yellow-950/10'
-                }`}
+                } ${item.severity === 'red' ? 'bg-red-950/20' : 'bg-yellow-950/10'}`}
               >
-                {/* Left severity bar */}
                 <div
                   className={`w-1 self-stretch rounded-full flex-shrink-0 ${
                     item.severity === 'red' ? 'bg-red-500' : 'bg-yellow-500'
                   }`}
                 />
-
                 <div className="flex flex-col gap-1 flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <SeverityBadge severity={item.severity} label={item.label} />
-                    <span className="text-white font-bold text-sm">
+                    <Link
+                      to={`/artists/${item.artistSlug}`}
+                      className="text-white font-bold text-sm hover:text-indigo-300 transition-colors"
+                    >
                       {item.artist}
-                    </span>
+                    </Link>
                   </div>
-                  <p className="text-gray-400 text-sm leading-relaxed">
-                    {item.issue}
-                  </p>
+                  <p className="text-gray-400 text-sm leading-relaxed">{item.issue}</p>
                 </div>
-
                 <button
                   className={`flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
                     item.severity === 'red'
@@ -352,26 +330,27 @@ function App() {
         {/* ── PIPELINE SNAPSHOT ── */}
         <section>
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-white">
-              Active Pipeline Snapshot
-            </h3>
-            <span className="text-gray-500 text-sm">{pipeline.length} deals</span>
+            <h3 className="text-lg font-bold text-white">Active Pipeline Snapshot</h3>
+            <Link
+              to="/artists"
+              className="text-indigo-400 text-sm hover:underline"
+            >
+              View all artists →
+            </Link>
           </div>
 
           <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-800">
-                  {['Artist', 'Event', 'Date', 'Buyer', 'Fee', 'Stage'].map(
-                    (h) => (
-                      <th
-                        key={h}
-                        className="text-left text-gray-500 font-semibold uppercase tracking-wider text-xs px-5 py-3 first:pl-5"
-                      >
-                        {h}
-                      </th>
-                    )
-                  )}
+                  {['Artist', 'Event', 'Date', 'Buyer', 'Fee', 'Stage'].map((h) => (
+                    <th
+                      key={h}
+                      className="text-left text-gray-500 font-semibold uppercase tracking-wider text-xs px-5 py-3"
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -381,16 +360,17 @@ function App() {
                     className="border-b border-gray-800 last:border-0 hover:bg-gray-800/50 transition-colors"
                   >
                     <td className="px-5 py-3.5">
-                      <span className="font-bold text-white">{row.artist}</span>
+                      <Link
+                        to={`/artists/${row.artistSlug}`}
+                        className="font-bold text-white hover:text-indigo-300 transition-colors"
+                      >
+                        {row.artist}
+                      </Link>
                     </td>
                     <td className="px-5 py-3.5 text-gray-300">{row.event}</td>
-                    <td className="px-5 py-3.5 text-gray-400 whitespace-nowrap">
-                      {row.date}
-                    </td>
+                    <td className="px-5 py-3.5 text-gray-400 whitespace-nowrap">{row.date}</td>
                     <td className="px-5 py-3.5 text-gray-400">{row.buyer}</td>
-                    <td className="px-5 py-3.5 font-semibold text-emerald-400">
-                      {row.fee}
-                    </td>
+                    <td className="px-5 py-3.5 font-semibold text-emerald-400">{row.fee}</td>
                     <td className="px-5 py-3.5">
                       <StageBadge stage={row.stage} color={row.stageColor} />
                     </td>
@@ -404,12 +384,24 @@ function App() {
         {/* ── FOOTER ── */}
         <footer className="mt-10 pt-6 border-t border-gray-800 text-center">
           <p className="text-gray-600 text-xs tracking-wide">
-            CORSON COMMAND CENTER · Corson Agency · Hard Techno Division · Danny
-            Ho (Johnny Blaze)
+            CORSON COMMAND CENTER · Corson Agency · Hard Techno Division · Danny Ho (Johnny Blaze)
           </p>
         </footer>
       </main>
     </div>
+  );
+}
+
+// ── APP (ROUTER) ──────────────────────────────────────────────────────────────
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/artists" element={<ArtistList />} />
+        <Route path="/artists/:slug" element={<ArtistDetail />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
