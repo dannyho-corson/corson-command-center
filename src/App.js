@@ -4,6 +4,8 @@ import './App.css';
 import ArtistList from './pages/ArtistList';
 import ArtistDetail from './pages/ArtistDetail';
 import Pipeline from './pages/Pipeline';
+import TargetList from './pages/TargetList';
+import TouringGrid from './pages/TouringGrid';
 import Nav from './components/Nav';
 import { supabase } from './lib/supabase';
 
@@ -400,6 +402,8 @@ function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/artists" element={<ArtistList />} />
         <Route path="/artists/:slug" element={<ArtistDetail />} />
+        <Route path="/artists/:slug/targets" element={<TargetList />} />
+        <Route path="/artists/:slug/grid" element={<TouringGrid />} />
         <Route path="/pipeline" element={<Pipeline />} />
       </Routes>
     </BrowserRouter>

@@ -3,6 +3,224 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import Nav from '../components/Nav';
 
+// ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
+const PIPELINE_STAGES = ['Offer In', 'Negotiating'];
+const SHOW_STAGES     = ['Confirmed', 'Contracted', 'Advanced', 'Settled'];
+const ALL_STAGES      = [...PIPELINE_STAGES, ...SHOW_STAGES];
+const DEAL_TYPES      = ['Club', 'Festival'];
+
+const EMPTY_DEAL = {
+  artist_slug: '',
+  stage: 'Offer In',
+  event_date: '',
+  market: '',
+  venue: '',
+  buyer: '',
+  buyer_company: '',
+  fee_offered: '',
+  fee_target: '',
+  deal_type: 'Club',
+  hold_number: '',
+  next_action: '',
+  notes: '',
+};
+
+function AddDealModal({ artists, onClose, onAdded }) {
+  const [form, setForm] = useState(EMPTY_DEAL);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.artist_slug) { setErr('Artist is required.'); return; }
+    setSaving(true); setErr(null);
+
+    // Decide which table based on stage
+    const isShowStage = SHOW_STAGES.includes(form.stage);
+    let data, error;
+
+    if (isShowStage) {
+      const payload = {
+        artist_id: artists.find(a => a.slug === form.artist_slug)?.id || null,
+        artist_slug: form.artist_slug,
+        event_date: form.event_date || null,
+        city: form.market || null,
+        venue: form.venue || null,
+        promoter: form.buyer_company || form.buyer || null,
+        fee: form.fee_offered || null,
+        deal_type: form.stage,
+        status: 'Active',
+        notes: form.notes || null,
+      };
+      ({ data, error } = await supabase.from('shows').insert(payload).select().single());
+    } else {
+      const payload = {
+        artist_slug: form.artist_slug,
+        stage: form.stage,
+        event_date: form.event_date || null,
+        market: form.market || null,
+        venue: form.venue || null,
+        buyer: form.buyer || null,
+        buyer_company: form.buyer_company || null,
+        fee_offered: form.fee_offered || null,
+        fee_target: form.fee_target || null,
+        deal_type: form.deal_type,
+        hold_number: form.hold_number ? parseInt(form.hold_number, 10) : null,
+        next_action: form.next_action || null,
+        notes: form.notes || null,
+      };
+      ({ data, error } = await supabase.from('pipeline').insert(payload).select().single());
+    }
+
+    if (error) { setErr(error.message); setSaving(false); return; }
+    onAdded(data, isShowStage ? 'show' : 'pipeline');
+    onClose();
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6 overflow-y-auto"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-xl shadow-2xl my-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+          <h3 className="text-white font-bold text-lg">Add Deal to Pipeline</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+
+          {/* Artist + Stage */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">
+                Artist <span className="text-red-400">*</span>
+              </label>
+              <select value={form.artist_slug} onChange={e => set('artist_slug', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500" required>
+                <option value="">Select artist…</option>
+                {artists.map(a => <option key={a.slug} value={a.slug}>{a.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Stage</label>
+              <select value={form.stage} onChange={e => set('stage', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+                {ALL_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Date + Market */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Event Date</label>
+              <input type="date" value={form.event_date} onChange={e => set('event_date', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Market / City</label>
+              <input type="text" value={form.market} onChange={e => set('market', e.target.value)}
+                placeholder="e.g. Miami, FL"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+
+          {/* Venue */}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Venue</label>
+            <input type="text" value={form.venue} onChange={e => set('venue', e.target.value)}
+              placeholder="e.g. Ground Zero Miami"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+          </div>
+
+          {/* Buyer + Company */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Buyer Contact</label>
+              <input type="text" value={form.buyer} onChange={e => set('buyer', e.target.value)}
+                placeholder="Name / email"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Buyer Company</label>
+              <input type="text" value={form.buyer_company} onChange={e => set('buyer_company', e.target.value)}
+                placeholder="e.g. Domicile Miami"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+
+          {/* Fee Offered + Fee Target */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Fee Offered</label>
+              <input type="text" value={form.fee_offered} onChange={e => set('fee_offered', e.target.value)}
+                placeholder="e.g. $2,500"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Fee Target</label>
+              <input type="text" value={form.fee_target} onChange={e => set('fee_target', e.target.value)}
+                placeholder="e.g. $3,000"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+
+          {/* Deal Type + Hold # */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Deal Type</label>
+              <select value={form.deal_type} onChange={e => set('deal_type', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+                {DEAL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Hold #</label>
+              <input type="number" value={form.hold_number} onChange={e => set('hold_number', e.target.value)}
+                placeholder="1"
+                min="1" max="5"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+
+          {/* Next Action */}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Next Action</label>
+            <input type="text" value={form.next_action} onChange={e => set('next_action', e.target.value)}
+              placeholder="e.g. Follow up with buyer by Thursday"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Notes</label>
+            <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
+              placeholder="Any context or deal notes…"
+              rows={2}
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600 resize-none" />
+          </div>
+
+          {err && <p className="text-red-400 text-xs">{err}</p>}
+
+          <div className="flex items-center justify-end gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-60 transition-colors"
+              style={{ backgroundColor: '#6366F1' }}>
+              {saving ? 'Saving…' : 'Add Deal'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── COLUMN DEFINITIONS ────────────────────────────────────────────────────────
 // Maps each kanban column to which stages from pipeline/shows belong there.
 const COLUMNS = [
@@ -165,6 +383,7 @@ export default function Pipeline() {
   const [filterSlug, setFilterSlug] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showAddDeal, setShowAddDeal] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -243,17 +462,26 @@ export default function Pipeline() {
             </p>
           </div>
 
-          {/* Artist filter */}
-          <select
-            value={filterSlug}
-            onChange={(e) => setFilterSlug(e.target.value)}
-            className="bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 min-w-[180px]"
-          >
-            <option value="">All Artists</option>
-            {artists.map((a) => (
-              <option key={a.slug} value={a.slug}>{a.name}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-3">
+            {/* Artist filter */}
+            <select
+              value={filterSlug}
+              onChange={(e) => setFilterSlug(e.target.value)}
+              className="bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 min-w-[180px]"
+            >
+              <option value="">All Artists</option>
+              {artists.map((a) => (
+                <option key={a.slug} value={a.slug}>{a.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => setShowAddDeal(true)}
+              className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg text-white whitespace-nowrap"
+              style={{ backgroundColor: '#6366F1' }}
+            >
+              + Add Deal
+            </button>
+          </div>
         </div>
 
         {/* Error */}
@@ -264,6 +492,20 @@ export default function Pipeline() {
         )}
 
         {/* ── KANBAN BOARD ── */}
+        {showAddDeal && (
+          <AddDealModal
+            artists={artists}
+            onClose={() => setShowAddDeal(false)}
+            onAdded={(data, source) => {
+              if (source === 'pipeline') {
+                setPipelineDeals(prev => [...prev, data].sort((a, b) => (a.event_date || '').localeCompare(b.event_date || '')));
+              } else {
+                setShows(prev => [...prev, data].sort((a, b) => (a.event_date || '').localeCompare(b.event_date || '')));
+              }
+            }}
+          />
+        )}
+
         {loading ? (
           <div className="flex gap-4 overflow-x-auto pb-4">
             {COLUMNS.map((col) => (
