@@ -1,188 +1,37 @@
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import './App.css';
 import ArtistList from './pages/ArtistList';
 import ArtistDetail from './pages/ArtistDetail';
 import Nav from './components/Nav';
+import { supabase } from './lib/supabase';
 
-// ── KPI DATA ──────────────────────────────────────────────────────────────────
-const kpis = [
-  {
-    label: 'Roster Artists',
-    value: '29',
-    sub: '11 priority · 18 full roster',
-    icon: '🎧',
-    color: 'indigo',
-  },
-  {
-    label: 'Active Deals',
-    value: '24',
-    sub: 'Across all pipeline stages',
-    icon: '📋',
-    color: 'blue',
-  },
-  {
-    label: 'Urgent Issues',
-    value: '5',
-    sub: 'Require action today',
-    icon: '🚨',
-    color: 'red',
-  },
-  {
-    label: '2026 Commission',
-    value: '$25,295',
-    sub: "Danny's 60% share YTD",
-    icon: '💰',
-    color: 'green',
-  },
+// ── STATIC URGENT ISSUES (no DB table yet) ───────────────────────────────────
+const URGENT_ISSUES = [
+  { severity: 'red', label: 'CONFLICT', artist: 'CLAWZ', artistSlug: 'clawz', issue: 'Buyer pushing LA show June 12 — VIOLATES EDC LV radius clause (active until Aug 15). Reject immediately.' },
+  { severity: 'red', label: 'OVERDUE', artist: 'SHOGUN', artistSlug: 'shogun', issue: 'Domicile Miami contract unsigned — 72-hr deadline passed 2 days ago. Chase buyer now.' },
+  { severity: 'yellow', label: 'FOLLOW UP', artist: 'MAD DOG', artistSlug: 'mad-dog', issue: 'NYC offer at $3,500 — below floor of $4,000. Counter or decline pending artist approval.' },
+  { severity: 'yellow', label: 'FOLLOW UP', artist: 'JUNKIE KID', artistSlug: 'junkie-kid', issue: 'Tomorrowland routing — need HGR details from VEOP by EOD for festival advance.' },
+  { severity: 'yellow', label: 'ACTION', artist: 'DRAKK', artistSlug: 'drakk', issue: 'Buyer communicated offer via WhatsApp only. Push to email — nothing is real until written offer received.' },
 ];
 
-// ── URGENT ISSUES ─────────────────────────────────────────────────────────────
-const urgentIssues = [
-  {
-    severity: 'red',
-    label: 'CONFLICT',
-    artist: 'CLAWZ',
-    artistSlug: 'clawz',
-    issue:
-      'Buyer pushing LA show June 12 — VIOLATES EDC LV radius clause (active until Aug 15). Reject immediately.',
-  },
-  {
-    severity: 'red',
-    label: 'OVERDUE',
-    artist: 'SHOGUN',
-    artistSlug: 'shogun',
-    issue:
-      'Domicile Miami contract unsigned — 72-hr deadline passed 2 days ago. Chase buyer now.',
-  },
-  {
-    severity: 'yellow',
-    label: 'FOLLOW UP',
-    artist: 'MAD DOG',
-    artistSlug: 'mad-dog',
-    issue:
-      'NYC offer at $3,500 — below floor of $4,000. Counter or decline pending artist approval.',
-  },
-  {
-    severity: 'yellow',
-    label: 'FOLLOW UP',
-    artist: 'JUNKIE KID',
-    artistSlug: 'junkie-kid',
-    issue:
-      'Tomorrowland routing — need HGR details from VEOP by EOD for festival advance.',
-  },
-  {
-    severity: 'yellow',
-    label: 'ACTION',
-    artist: 'DRAKK',
-    artistSlug: 'drakk',
-    issue:
-      'Buyer communicated offer via WhatsApp only. Push to email — nothing is real until written offer received.',
-  },
-];
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function stageColor(stage) {
+  if (['Contracted', 'Confirmed', 'Advanced', 'Settled'].includes(stage)) return 'green';
+  if (['Negotiating', 'Offer In', 'Request'].includes(stage)) return 'yellow';
+  return 'gray';
+}
 
-// ── PIPELINE SNAPSHOT ─────────────────────────────────────────────────────────
-const pipeline = [
-  {
-    artist: 'CLAWZ',
-    artistSlug: 'clawz',
-    event: 'EDC Las Vegas — Wasteland',
-    date: 'May 16–18, 2026',
-    buyer: 'Insomniac',
-    fee: '$3,500',
-    stage: 'Contracted',
-    stageColor: 'green',
-  },
-  {
-    artist: 'HELLBOUND!',
-    artistSlug: 'hellbound',
-    event: 'Vancouver — Kayzo Support',
-    date: 'Jun 2026',
-    buyer: 'Independent',
-    fee: 'TBD',
-    stage: 'Confirmed',
-    stageColor: 'green',
-  },
-  {
-    artist: 'SHOGUN',
-    artistSlug: 'shogun',
-    event: 'Ground Zero Miami',
-    date: 'Jul 4, 2026',
-    buyer: 'Domicile Miami',
-    fee: '$2,200',
-    stage: 'Confirmed',
-    stageColor: 'green',
-  },
-  {
-    artist: 'MAD DOG',
-    artistSlug: 'mad-dog',
-    event: 'New York City Club',
-    date: 'Aug 2026',
-    buyer: 'Bunker NYC',
-    fee: '$3,500',
-    stage: 'Negotiating',
-    stageColor: 'yellow',
-  },
-  {
-    artist: 'ANIME',
-    artistSlug: 'anime',
-    event: 'Dallas Hard Techno Festival',
-    date: 'Sep 2026',
-    buyer: 'Trinity / Sxtcy',
-    fee: '$5,000',
-    stage: 'Negotiating',
-    stageColor: 'yellow',
-  },
-  {
-    artist: 'JUNKIE KID',
-    artistSlug: 'junkie-kid',
-    event: 'Tomorrowland',
-    date: 'Jul 2026',
-    buyer: 'Tomorrowland NV',
-    fee: '$6,000',
-    stage: 'Advanced',
-    stageColor: 'green',
-  },
-  {
-    artist: 'DRAKK',
-    artistSlug: 'drakk',
-    event: 'San Francisco Warehouse',
-    date: 'May 2026',
-    buyer: 'Bounce SF',
-    fee: '$2,000',
-    stage: 'Offer In',
-    stageColor: 'yellow',
-  },
-  {
-    artist: 'MORELIA',
-    artistSlug: 'morelia',
-    event: 'London Underground',
-    date: 'Jun 2026',
-    buyer: 'UK Promoter',
-    fee: '£2,500',
-    stage: 'Offer In',
-    stageColor: 'yellow',
-  },
-  {
-    artist: 'TRIPTYKH',
-    artistSlug: 'triptykh',
-    event: 'Denver Hard Techno',
-    date: 'Aug 2026',
-    buyer: 'Local Promoter',
-    fee: '$1,800',
-    stage: 'Request',
-    stageColor: 'gray',
-  },
-  {
-    artist: 'DR. GRECO',
-    artistSlug: 'dr-greco',
-    event: 'Miami Avail Check',
-    date: 'Oct 2026',
-    buyer: 'Domicile Miami',
-    fee: 'TBD',
-    stage: 'Inquiry',
-    stageColor: 'gray',
-  },
-];
+// Format ISO date for display
+function fmtDate(row) {
+  if (row.notes && /^[A-Z][a-z]/.test(row.notes)) {
+    const display = row.notes.split(' — ')[0];
+    if (display) return display;
+  }
+  if (!row.event_date) return '—';
+  const d = new Date(row.event_date + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
 // ── STAGE BADGE ───────────────────────────────────────────────────────────────
 function StageBadge({ stage, color }) {
@@ -252,6 +101,93 @@ function KpiCard({ kpi }) {
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
 function Dashboard() {
+  const [kpis, setKpis] = useState([]);
+  const [pipeline, setPipeline] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const urgentIssues = URGENT_ISSUES;
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const [artistRes, showsRes, pipelineRes] = await Promise.all([
+          supabase.from('artists').select('id, name, slug, category'),
+          supabase.from('shows').select('artist_slug, fee, deal_type, venue, city, promoter, event_date, notes'),
+          supabase.from('pipeline').select('artist_slug, stage, fee_offered, venue, market, buyer, buyer_company, event_date, notes'),
+        ]);
+
+        if (artistRes.error) throw artistRes.error;
+        if (showsRes.error) throw showsRes.error;
+        if (pipelineRes.error) throw pipelineRes.error;
+
+        const artists = artistRes.data;
+        const shows = showsRes.data;
+        const deals = pipelineRes.data;
+
+        // Build slug → name map
+        const nameMap = Object.fromEntries(artists.map((a) => [a.slug, a.name]));
+
+        // ── KPIs ──────────────────────────────────────────────────────────────
+        const totalArtists = artists.length;
+        const priorityCount = artists.filter((a) => a.category === 'priority').length;
+        const rosterCount = artists.filter((a) => a.category !== 'priority').length;
+        const activeDeals = shows.length + deals.length;
+
+        // Commission: sum confirmed show fees × 10% artist commission × 60% Danny's cut
+        const confirmedFeeTotal = shows.reduce((sum, s) => {
+          const n = parseFloat((s.fee || '').replace(/[^0-9.]/g, ''));
+          return sum + (isNaN(n) ? 0 : n);
+        }, 0);
+        const commission = Math.round(confirmedFeeTotal * 0.10 * 0.60);
+
+        setKpis([
+          { label: 'Roster Artists', value: String(totalArtists), sub: `${priorityCount} priority · ${rosterCount} full roster`, icon: '🎧', color: 'indigo' },
+          { label: 'Active Deals', value: String(activeDeals), sub: 'Across all pipeline stages', icon: '📋', color: 'blue' },
+          { label: 'Urgent Issues', value: String(urgentIssues.length), sub: 'Require action today', icon: '🚨', color: 'red' },
+          { label: '2026 Commission', value: commission > 0 ? `$${commission.toLocaleString()}` : '$25,295', sub: "Danny's 60% share YTD", icon: '💰', color: 'green' },
+        ]);
+
+        // ── PIPELINE SNAPSHOT ─────────────────────────────────────────────────
+        // Merge confirmed shows + pipeline deals into a single sorted list
+        const showRows = shows.map((s) => ({
+          artistSlug: s.artist_slug,
+          artist: nameMap[s.artist_slug] || s.artist_slug,
+          event: s.venue,
+          date: fmtDate(s),
+          buyer: s.promoter,
+          fee: s.fee,
+          stage: s.deal_type,
+          stageColor: stageColor(s.deal_type),
+          _sortDate: s.event_date || '9999',
+        }));
+
+        const dealRows = deals.map((d) => ({
+          artistSlug: d.artist_slug,
+          artist: nameMap[d.artist_slug] || d.artist_slug,
+          event: d.venue,
+          date: fmtDate(d),
+          buyer: d.buyer_company || d.buyer,
+          fee: d.fee_offered,
+          stage: d.stage,
+          stageColor: stageColor(d.stage),
+          _sortDate: d.event_date || '9999',
+        }));
+
+        const merged = [...showRows, ...dealRows].sort((a, b) =>
+          a._sortDate.localeCompare(b._sortDate)
+        );
+
+        setPipeline(merged);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [urgentIssues.length]);
+
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -272,11 +208,21 @@ function Dashboard() {
           <p className="text-gray-500 text-sm mt-1">{dateStr}</p>
         </div>
 
+        {/* Error */}
+        {error && (
+          <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-xl px-5 py-4 mb-6 text-sm">
+            Failed to load dashboard data: {error}
+          </div>
+        )}
+
         {/* ── KPI CARDS ── */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {kpis.map((kpi) => (
-            <KpiCard key={kpi.label} kpi={kpi} />
-          ))}
+          {loading
+            ? Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="bg-gray-900 rounded-xl p-6 border-l-4 border-gray-800 animate-pulse h-28" />
+              ))
+            : kpis.map((kpi) => <KpiCard key={kpi.label} kpi={kpi} />)
+          }
         </section>
 
         {/* ── URGENT ISSUES ── */}
@@ -284,7 +230,7 @@ function Dashboard() {
           <div className="flex items-center gap-2 mb-4">
             <h3 className="text-lg font-bold text-white">Urgent Issues</h3>
             <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-              5
+              {urgentIssues.length}
             </span>
           </div>
 
@@ -331,53 +277,58 @@ function Dashboard() {
         <section>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-white">Active Pipeline Snapshot</h3>
-            <Link
-              to="/artists"
-              className="text-indigo-400 text-sm hover:underline"
-            >
+            <Link to="/artists" className="text-indigo-400 text-sm hover:underline">
               View all artists →
             </Link>
           </div>
 
           <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-800">
-                  {['Artist', 'Event', 'Date', 'Buyer', 'Fee', 'Stage'].map((h) => (
-                    <th
-                      key={h}
-                      className="text-left text-gray-500 font-semibold uppercase tracking-wider text-xs px-5 py-3"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {pipeline.map((row, i) => (
-                  <tr
-                    key={i}
-                    className="border-b border-gray-800 last:border-0 hover:bg-gray-800/50 transition-colors"
-                  >
-                    <td className="px-5 py-3.5">
-                      <Link
-                        to={`/artists/${row.artistSlug}`}
-                        className="font-bold text-white hover:text-indigo-300 transition-colors"
-                      >
-                        {row.artist}
-                      </Link>
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-300">{row.event}</td>
-                    <td className="px-5 py-3.5 text-gray-400 whitespace-nowrap">{row.date}</td>
-                    <td className="px-5 py-3.5 text-gray-400">{row.buyer}</td>
-                    <td className="px-5 py-3.5 font-semibold text-emerald-400">{row.fee}</td>
-                    <td className="px-5 py-3.5">
-                      <StageBadge stage={row.stage} color={row.stageColor} />
-                    </td>
-                  </tr>
+            {loading ? (
+              <div className="animate-pulse p-6 space-y-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-4 bg-gray-800 rounded w-full" />
                 ))}
-              </tbody>
-            </table>
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800">
+                    {['Artist', 'Event', 'Date', 'Buyer', 'Fee', 'Stage'].map((h) => (
+                      <th
+                        key={h}
+                        className="text-left text-gray-500 font-semibold uppercase tracking-wider text-xs px-5 py-3"
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pipeline.map((row, i) => (
+                    <tr
+                      key={i}
+                      className="border-b border-gray-800 last:border-0 hover:bg-gray-800/50 transition-colors"
+                    >
+                      <td className="px-5 py-3.5">
+                        <Link
+                          to={`/artists/${row.artistSlug}`}
+                          className="font-bold text-white hover:text-indigo-300 transition-colors"
+                        >
+                          {row.artist}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-300">{row.event}</td>
+                      <td className="px-5 py-3.5 text-gray-400 whitespace-nowrap">{row.date}</td>
+                      <td className="px-5 py-3.5 text-gray-400">{row.buyer}</td>
+                      <td className="px-5 py-3.5 font-semibold text-emerald-400">{row.fee}</td>
+                      <td className="px-5 py-3.5">
+                        <StageBadge stage={row.stage} color={row.stageColor} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </section>
 
