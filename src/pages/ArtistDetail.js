@@ -65,6 +65,180 @@ function DealBadge({ type }) {
   return <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${cls}`}>{type}</span>;
 }
 
+// ── EDIT ARTIST MODAL ─────────────────────────────────────────────────────────
+function EditArtistModal({ artist, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: artist.name || '',
+    genre: artist.genre || '',
+    base: artist.base || '',
+    spotify: artist.spotify || '',
+    instagram: artist.instagram || '',
+    instagram_followers: artist.instagram_followers ? String(artist.instagram_followers) : '',
+    club_fee: artist.club_fee || '',
+    festival_fee: artist.festival_fee || '',
+    manager_name: artist.manager_name || '',
+    manager_email: artist.manager_email || '',
+    label: artist.label || '',
+    eu_agent: artist.eu_agent || '',
+    notes: artist.notes || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.name) { setErr('Name is required.'); return; }
+    setSaving(true); setErr(null);
+
+    const payload = {
+      name: form.name,
+      genre: form.genre || null,
+      base: form.base || null,
+      spotify: form.spotify || null,
+      instagram: form.instagram || null,
+      instagram_followers: form.instagram_followers ? parseInt(form.instagram_followers.replace(/[^0-9]/g, ''), 10) || null : null,
+      club_fee: form.club_fee || null,
+      festival_fee: form.festival_fee || null,
+      manager_name: form.manager_name || null,
+      manager_email: form.manager_email || null,
+      label: form.label || null,
+      eu_agent: form.eu_agent || null,
+      notes: form.notes || null,
+    };
+
+    const { data, error } = await supabase.from('artists').update(payload).eq('id', artist.id).select().single();
+    if (error) { setErr(error.message); setSaving(false); return; }
+    onSaved(data);
+    onClose();
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6 overflow-y-auto"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-xl shadow-2xl my-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+          <h3 className="text-white font-bold text-lg">Edit — {artist.name}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {/* Name + Genre */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Name <span className="text-red-400">*</span></label>
+              <input type="text" value={form.name} onChange={e => set('name', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500" required />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Genre</label>
+              <input type="text" value={form.genre} onChange={e => set('genre', e.target.value)}
+                placeholder="e.g. Hard Techno"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+          {/* Base */}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Base / Location</label>
+            <input type="text" value={form.base} onChange={e => set('base', e.target.value)}
+              placeholder="e.g. Los Angeles, CA"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+          </div>
+          {/* Spotify + IG */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Spotify (display)</label>
+              <input type="text" value={form.spotify} onChange={e => set('spotify', e.target.value)}
+                placeholder="e.g. 145.3K"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">IG Handle</label>
+              <input type="text" value={form.instagram} onChange={e => set('instagram', e.target.value)}
+                placeholder="@handle"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+          {/* IG followers + Club Fee */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">IG Followers</label>
+              <input type="text" value={form.instagram_followers} onChange={e => set('instagram_followers', e.target.value)}
+                placeholder="e.g. 19000"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Club Fee</label>
+              <input type="text" value={form.club_fee} onChange={e => set('club_fee', e.target.value)}
+                placeholder="e.g. $1,250–$1,500"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+          {/* Festival Fee + EU Agent */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Festival Fee</label>
+              <input type="text" value={form.festival_fee} onChange={e => set('festival_fee', e.target.value)}
+                placeholder="e.g. $3,000–$6,000"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">EU Agent</label>
+              <input type="text" value={form.eu_agent} onChange={e => set('eu_agent', e.target.value)}
+                placeholder="e.g. Octaine (Gearbox)"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+          {/* Manager Name + Email */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Manager Name</label>
+              <input type="text" value={form.manager_name} onChange={e => set('manager_name', e.target.value)}
+                placeholder="e.g. JJ"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Manager Email</label>
+              <input type="email" value={form.manager_email} onChange={e => set('manager_email', e.target.value)}
+                placeholder="manager@agency.com"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+          {/* Label */}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Label</label>
+            <input type="text" value={form.label} onChange={e => set('label', e.target.value)}
+              placeholder="e.g. Ill Behavior Techno (co-founder)"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+          </div>
+          {/* Notes */}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Notes</label>
+            <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
+              placeholder="Important notes, radius clauses, context…"
+              rows={3}
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600 resize-none" />
+          </div>
+          {err && <p className="text-red-400 text-xs">{err}</p>}
+          <div className="flex items-center justify-end gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-60 transition-colors"
+              style={{ backgroundColor: '#6366F1' }}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── ADD SHOW MODAL ────────────────────────────────────────────────────────────
 const DEAL_TYPES = ['Confirmed', 'Contracted', 'Advanced', 'Settled'];
 const STATUS_OPTS = ['Active', 'Hold', 'Cancelled'];
@@ -301,6 +475,7 @@ export default function ArtistDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -370,7 +545,15 @@ export default function ArtistDetail() {
           <>
             {/* ── ARTIST HEADER ── */}
             <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-6">
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+              <div className="relative flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+
+                {/* Edit button */}
+                <button
+                  onClick={() => setShowEditModal(true)}
+                  className="absolute top-4 right-4 sm:static sm:self-start text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-white transition-colors"
+                >
+                  Edit
+                </button>
 
                 {/* Left: name + meta */}
                 <div>
@@ -582,6 +765,15 @@ export default function ArtistDetail() {
                     )
                   );
                 }}
+              />
+            )}
+
+            {/* ── EDIT ARTIST MODAL ── */}
+            {showEditModal && (
+              <EditArtistModal
+                artist={artist}
+                onClose={() => setShowEditModal(false)}
+                onSaved={(updated) => setArtist(updated)}
               />
             )}
           </>

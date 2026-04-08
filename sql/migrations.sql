@@ -30,3 +30,25 @@ on conflict do nothing;
 -- Enable Row Level Security (recommended for production)
 -- alter table urgent_issues enable row level security;
 -- create policy "allow all" on urgent_issues for all using (true);
+
+-- ── buyers table ──────────────────────────────────────────────────────────────
+-- Buyer Rolodex — all promoter/venue contacts.
+-- Run this in the Supabase SQL Editor before using the /rolodex page.
+
+create table if not exists buyers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  company text,
+  market text,
+  email text,
+  instagram text,
+  region text,
+  status text not null default 'Cold' check (status in ('Active', 'Warm', 'Cold', 'Graveyard', 'Red Flag')),
+  notes text,
+  artists_worked text,
+  created_at timestamptz default now()
+);
+
+-- Enable Row Level Security (recommended for production)
+-- alter table buyers enable row level security;
+-- create policy "allow all" on buyers for all using (true);

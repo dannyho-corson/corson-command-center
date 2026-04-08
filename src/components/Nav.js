@@ -43,6 +43,12 @@ export default function Nav() {
             >
               Pipeline
             </Link>
+            <Link
+              to="/rolodex"
+              className="text-gray-400 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors"
+            >
+              Rolodex
+            </Link>
           </div>
         </div>
 
