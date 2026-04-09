@@ -4,14 +4,18 @@ import { supabase } from '../lib/supabase';
 import Nav from '../components/Nav';
 
 // ── STATUS CONFIG ─────────────────────────────────────────────────────────────
-const STATUS_OPTIONS = ['To Pitch', 'Active', 'Warm', 'Confirmed', 'Dead'];
+const STATUS_OPTIONS = ['Not Started', 'Contacted', 'In Conversation', 'Confirmed', 'Dead'];
 
 const STATUS_STYLE = {
-  Confirmed: 'bg-emerald-900 text-emerald-300 border-emerald-700',
-  Active:    'bg-yellow-900 text-yellow-300 border-yellow-700',
-  Warm:      'bg-yellow-900 text-yellow-300 border-yellow-700',
-  'To Pitch':'bg-gray-800 text-gray-400 border-gray-700',
-  Dead:      'bg-red-900 text-red-400 border-red-800',
+  'Not Started':    'bg-gray-800 text-gray-400 border-gray-700',
+  Contacted:        'bg-blue-900 text-blue-300 border-blue-700',
+  'In Conversation':'bg-yellow-900 text-yellow-300 border-yellow-700',
+  Confirmed:        'bg-emerald-900 text-emerald-300 border-emerald-700',
+  Dead:             'bg-red-900 text-red-400 border-red-800',
+  // legacy values
+  'To Pitch':       'bg-gray-800 text-gray-400 border-gray-700',
+  Active:           'bg-yellow-900 text-yellow-300 border-yellow-700',
+  Warm:             'bg-yellow-900 text-yellow-300 border-yellow-700',
 };
 
 function StatusBadge({ status }) {
@@ -129,6 +133,115 @@ function AddTargetModal({ artistSlug, onClose, onAdded }) {
   );
 }
 
+// ── EDIT TARGET MODAL ─────────────────────────────────────────────────────────
+function EditTargetModal({ target, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    promoter:      target.promoter      || '',
+    contact:       target.contact       || '',
+    market:        target.market        || '',
+    outreach_date: target.outreach_date || '',
+    status:        target.status        || 'Not Started',
+    notes:         target.notes         || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr]       = useState(null);
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.promoter) { setErr('Promoter is required.'); return; }
+    setSaving(true); setErr(null);
+    const { data, error } = await supabase
+      .from('targets')
+      .update({
+        promoter:      form.promoter,
+        contact:       form.contact       || null,
+        market:        form.market        || null,
+        outreach_date: form.outreach_date || null,
+        status:        form.status,
+        notes:         form.notes         || null,
+      })
+      .eq('id', target.id)
+      .select()
+      .single();
+    if (error) { setErr(error.message); setSaving(false); return; }
+    onSaved(data);
+    onClose();
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+          <h3 className="text-white font-bold text-lg">Edit Target</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">
+                Promoter <span className="text-red-400">*</span>
+              </label>
+              <input type="text" value={form.promoter} onChange={e => set('promoter', e.target.value)}
+                placeholder="e.g. Domicile Miami"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" required />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Contact</label>
+              <input type="text" value={form.contact} onChange={e => set('contact', e.target.value)}
+                placeholder="Name or email"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Market</label>
+              <input type="text" value={form.market} onChange={e => set('market', e.target.value)}
+                placeholder="e.g. Miami, FL"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Outreach Date</label>
+              <input type="date" value={form.outreach_date} onChange={e => set('outreach_date', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Status</label>
+            <select value={form.status} onChange={e => set('status', e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+              {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Notes</label>
+            <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
+              placeholder="Any relevant notes..."
+              rows={2}
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600 resize-none" />
+          </div>
+          {err && <p className="text-red-400 text-xs">{err}</p>}
+          <div className="flex items-center justify-end gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-60 transition-colors"
+              style={{ backgroundColor: '#6366F1' }}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── PAGE ──────────────────────────────────────────────────────────────────────
 export default function TargetList() {
   const { slug } = useParams();
@@ -138,6 +251,7 @@ export default function TargetList() {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
+  const [editTarget, setEditTarget] = useState(null);
 
   useEffect(() => {
     async function load() {
@@ -158,6 +272,18 @@ export default function TargetList() {
     }
     load();
   }, [slug]);
+
+  async function cycleStatus(t) {
+    const idx = STATUS_OPTIONS.indexOf(t.status);
+    const nextStatus = STATUS_OPTIONS[(idx + 1) % STATUS_OPTIONS.length];
+    const { data, error } = await supabase
+      .from('targets')
+      .update({ status: nextStatus })
+      .eq('id', t.id)
+      .select()
+      .single();
+    if (!error) setTargets(prev => prev.map(x => x.id === t.id ? data : x));
+  }
 
   const filtered = filterStatus ? targets.filter(t => t.status === filterStatus) : targets;
 
@@ -272,12 +398,20 @@ export default function TargetList() {
                     ? new Date(t.outreach_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                     : '—';
                   return (
-                    <tr key={t.id} className={`border-b border-gray-800 last:border-0 transition-colors ${rowBg}`}>
+                    <tr key={t.id} onClick={() => setEditTarget(t)}
+                      className={`border-b border-gray-800 last:border-0 transition-colors cursor-pointer ${rowBg}`}>
                       <td className="px-5 py-3.5 text-white font-semibold">{t.promoter}</td>
                       <td className="px-5 py-3.5 text-gray-400">{t.contact || '—'}</td>
                       <td className="px-5 py-3.5 text-gray-300">{t.market || '—'}</td>
                       <td className="px-5 py-3.5 text-gray-400 whitespace-nowrap">{fmtOutreach}</td>
-                      <td className="px-5 py-3.5"><StatusBadge status={t.status} /></td>
+                      <td className="px-5 py-3.5">
+                        <button
+                          onClick={e => { e.stopPropagation(); cycleStatus(t); }}
+                          title="Click to cycle status"
+                        >
+                          <StatusBadge status={t.status} />
+                        </button>
+                      </td>
                       <td className="px-5 py-3.5 text-gray-500 max-w-xs truncate">{t.notes || '—'}</td>
                     </tr>
                   );
@@ -301,6 +435,17 @@ export default function TargetList() {
           artistSlug={slug}
           onClose={() => setShowModal(false)}
           onAdded={t => setTargets(prev => [t, ...prev])}
+        />
+      )}
+
+      {editTarget && (
+        <EditTargetModal
+          target={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={updated => {
+            setTargets(prev => prev.map(t => t.id === updated.id ? updated : t));
+            setEditTarget(null);
+          }}
         />
       )}
     </div>

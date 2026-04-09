@@ -442,9 +442,10 @@ function AddDealModal({ artist, onClose, onAdded }) {
   );
 }
 
-// ── ADD SHOW MODAL ────────────────────────────────────────────────────────────
+// ── ADD / EDIT SHOW MODAL ─────────────────────────────────────────────────────
 const DEAL_TYPES = ['Confirmed', 'Contracted', 'Advanced', 'Settled'];
 const STATUS_OPTS = ['Active', 'Hold', 'Cancelled'];
+const SHOW_STATUS_OPTS = ['Pending', 'Confirmed', 'Contracted', 'Advancing', 'Rescheduling', 'Settled'];
 
 const EMPTY_FORM = {
   event_date: '',
@@ -656,6 +657,112 @@ function AddShowModal({ artist, onClose, onAdded }) {
   );
 }
 
+// ── EDIT SHOW MODAL ───────────────────────────────────────────────────────────
+function EditShowModal({ show, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    city:     show.city     || '',
+    venue:    show.venue    || '',
+    promoter: show.promoter || '',
+    fee:      show.fee      || '',
+    status:   show.status   || 'Confirmed',
+    notes:    show.notes    || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr]       = useState(null);
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true); setErr(null);
+    const { data, error } = await supabase
+      .from('shows')
+      .update({
+        city:     form.city     || null,
+        venue:    form.venue    || null,
+        promoter: form.promoter || null,
+        fee:      form.fee      || null,
+        status:   form.status,
+        notes:    form.notes    || null,
+      })
+      .eq('id', show.id)
+      .select()
+      .single();
+    if (error) { setErr(error.message); setSaving(false); return; }
+    onSaved(data);
+    onClose();
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+          <h3 className="text-white font-bold text-lg">Edit Show</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">City</label>
+              <input type="text" value={form.city} onChange={e => set('city', e.target.value)}
+                placeholder="e.g. Miami, FL"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Venue</label>
+              <input type="text" value={form.venue} onChange={e => set('venue', e.target.value)}
+                placeholder="e.g. Ground Zero Miami"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Promoter</label>
+              <input type="text" value={form.promoter} onChange={e => set('promoter', e.target.value)}
+                placeholder="e.g. Domicile Miami"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Fee</label>
+              <input type="text" value={form.fee} onChange={e => set('fee', e.target.value)}
+                placeholder="e.g. $2,500"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Status</label>
+            <select value={form.status} onChange={e => set('status', e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+              {SHOW_STATUS_OPTS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Notes</label>
+            <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
+              rows={2} placeholder="Any relevant notes..."
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600 resize-none" />
+          </div>
+          {err && <p className="text-red-400 text-xs">{err}</p>}
+          <div className="flex items-center justify-end gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-60 transition-colors"
+              style={{ backgroundColor: '#6366F1' }}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── LOADING SKELETON ──────────────────────────────────────────────────────────
 function Skeleton() {
   return (
@@ -680,6 +787,7 @@ export default function ArtistDetail() {
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDealModal, setShowDealModal] = useState(false);
+  const [editShow, setEditShow] = useState(null);
   const [activityLog, setActivityLog] = useState([]);
 
   useEffect(() => {
@@ -906,7 +1014,8 @@ export default function ArtistDetail() {
                     </thead>
                     <tbody>
                       {shows.map((show) => (
-                        <tr key={show.id} className="border-b border-gray-800 last:border-0 bg-emerald-950/10 hover:bg-emerald-950/20 transition-colors">
+                        <tr key={show.id} onClick={() => setEditShow(show)}
+                          className="border-b border-gray-800 last:border-0 bg-emerald-950/10 hover:bg-emerald-950/20 transition-colors cursor-pointer">
                           <td className="px-5 py-3.5 text-gray-300 whitespace-nowrap">{fmtDate(show)}</td>
                           <td className="px-5 py-3.5 text-gray-300">{show.city}</td>
                           <td className="px-5 py-3.5 text-white font-medium">{show.venue}</td>
@@ -1018,6 +1127,18 @@ export default function ArtistDetail() {
                     id: `tmp-${Date.now()}`, artist_slug: artist.slug,
                     action: 'deal_added', description: desc, created_at: new Date().toISOString(),
                   }, ...prev]);
+                }}
+              />
+            )}
+
+            {/* ── EDIT SHOW MODAL ── */}
+            {editShow && (
+              <EditShowModal
+                show={editShow}
+                onClose={() => setEditShow(null)}
+                onSaved={(updated) => {
+                  setShows(prev => prev.map(s => s.id === updated.id ? updated : s));
+                  setEditShow(null);
                 }}
               />
             )}
