@@ -90,11 +90,12 @@ function ArtistCard({ artist, confirmedCount, pipelineCount, confirmedFeeTotal }
 // ── PAGE ──────────────────────────────────────────────────────────────────────
 export default function ArtistList() {
   const [artists, setArtists] = useState([]);
-  const [showCounts, setShowCounts] = useState({});    // slug → count
-  const [pipelineCounts, setPipelineCounts] = useState({}); // slug → count
-  const [showFees, setShowFees] = useState({});        // slug → total fee
+  const [showCounts, setShowCounts] = useState({});
+  const [pipelineCounts, setPipelineCounts] = useState({});
+  const [showFees, setShowFees] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     async function load() {
@@ -137,9 +138,17 @@ export default function ArtistList() {
     load();
   }, []);
 
-  const priority = artists.filter((a) => a.category === 'priority');
-  const roster = artists.filter((a) => a.category === 'roster');
-  const leo = artists.filter((a) => a.category === 'leo');
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? artists.filter(a =>
+        a.name.toLowerCase().includes(q) ||
+        (a.genre || '').toLowerCase().includes(q)
+      )
+    : artists;
+
+  const priority = filtered.filter((a) => a.category === 'priority');
+  const roster   = filtered.filter((a) => a.category === 'roster');
+  const leo      = filtered.filter((a) => a.category === 'leo');
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: '#111827' }}>
@@ -157,7 +166,7 @@ export default function ArtistList() {
       <main className="max-w-7xl mx-auto px-6 py-6">
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
             <h2 className="text-2xl font-bold text-white">Artist Roster</h2>
             <p className="text-gray-500 text-sm mt-1">
@@ -172,6 +181,22 @@ export default function ArtistList() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Search */}
+        <div className="mb-6">
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name or genre…"
+            className="w-full sm:max-w-sm bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-4 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600"
+          />
+          {q && (
+            <p className="text-gray-500 text-xs mt-2">
+              {filtered.length} result{filtered.length !== 1 ? 's' : ''} for "{search}"
+            </p>
+          )}
         </div>
 
         {/* Error */}
@@ -196,59 +221,71 @@ export default function ArtistList() {
 
         {!loading && !error && (
           <>
+            {q && filtered.length === 0 && (
+              <div className="bg-gray-900 rounded-xl border border-gray-800 px-5 py-10 text-center">
+                <p className="text-gray-500 text-sm">No artists match "{search}".</p>
+              </div>
+            )}
+
             {/* ── PRIORITY ── */}
-            <section className="mb-10">
-              <div className="flex items-center gap-2 mb-4">
-                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Priority Artists</h3>
-                <span className="text-gray-600 text-xs bg-gray-800 px-2 py-0.5 rounded-full">{priority.length}</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {priority.map((a) => (
-                  <ArtistCard
-                    key={a.slug} artist={a}
-                    confirmedCount={showCounts[a.slug] || 0}
-                    pipelineCount={pipelineCounts[a.slug] || 0}
-                    confirmedFeeTotal={showFees[a.slug] || 0}
-                  />
-                ))}
-              </div>
-            </section>
+            {priority.length > 0 && (
+              <section className="mb-10">
+                <div className="flex items-center gap-2 mb-4">
+                  <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Priority Artists</h3>
+                  <span className="text-gray-600 text-xs bg-gray-800 px-2 py-0.5 rounded-full">{priority.length}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {priority.map((a) => (
+                    <ArtistCard
+                      key={a.slug} artist={a}
+                      confirmedCount={showCounts[a.slug] || 0}
+                      pipelineCount={pipelineCounts[a.slug] || 0}
+                      confirmedFeeTotal={showFees[a.slug] || 0}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
             {/* ── FULL ROSTER ── */}
-            <section className="mb-10">
-              <div className="flex items-center gap-2 mb-4">
-                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Full Roster</h3>
-                <span className="text-gray-600 text-xs bg-gray-800 px-2 py-0.5 rounded-full">{roster.length}</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {roster.map((a) => (
-                  <ArtistCard
-                    key={a.slug} artist={a}
-                    confirmedCount={showCounts[a.slug] || 0}
-                    pipelineCount={pipelineCounts[a.slug] || 0}
-                    confirmedFeeTotal={showFees[a.slug] || 0}
-                  />
-                ))}
-              </div>
-            </section>
+            {roster.length > 0 && (
+              <section className="mb-10">
+                <div className="flex items-center gap-2 mb-4">
+                  <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Full Roster</h3>
+                  <span className="text-gray-600 text-xs bg-gray-800 px-2 py-0.5 rounded-full">{roster.length}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {roster.map((a) => (
+                    <ArtistCard
+                      key={a.slug} artist={a}
+                      confirmedCount={showCounts[a.slug] || 0}
+                      pipelineCount={pipelineCounts[a.slug] || 0}
+                      confirmedFeeTotal={showFees[a.slug] || 0}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
             {/* ── LEO'S ARTISTS ── */}
-            <section className="mb-10">
-              <div className="flex items-center gap-2 mb-4">
-                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Leo's Artists</h3>
-                <span className="text-gray-600 text-xs bg-gray-800 px-2 py-0.5 rounded-full">{leo.length}</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {leo.map((a) => (
-                  <ArtistCard
-                    key={a.slug} artist={a}
-                    confirmedCount={showCounts[a.slug] || 0}
-                    pipelineCount={pipelineCounts[a.slug] || 0}
-                    confirmedFeeTotal={showFees[a.slug] || 0}
-                  />
-                ))}
-              </div>
-            </section>
+            {leo.length > 0 && (
+              <section className="mb-10">
+                <div className="flex items-center gap-2 mb-4">
+                  <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Leo's Artists</h3>
+                  <span className="text-gray-600 text-xs bg-gray-800 px-2 py-0.5 rounded-full">{leo.length}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {leo.map((a) => (
+                    <ArtistCard
+                      key={a.slug} artist={a}
+                      confirmedCount={showCounts[a.slug] || 0}
+                      pipelineCount={pipelineCounts[a.slug] || 0}
+                      confirmedFeeTotal={showFees[a.slug] || 0}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )}
       </main>

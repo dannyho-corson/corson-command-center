@@ -239,6 +239,176 @@ function EditArtistModal({ artist, onClose, onSaved }) {
   );
 }
 
+// ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
+const PIPELINE_STAGES = ['Offer In', 'Negotiating', 'Confirmed'];
+const DEAL_CATEGORIES = ['Club', 'Festival'];
+
+const EMPTY_DEAL = {
+  stage: 'Offer In', event_date: '', market: '', venue: '',
+  buyer: '', buyer_company: '', fee_offered: '', fee_target: '',
+  deal_type: 'Club', hold_number: '', next_action: '', notes: '',
+};
+
+function AddDealModal({ artist, onClose, onAdded }) {
+  const [form, setForm] = useState(EMPTY_DEAL);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true); setErr(null);
+    const payload = {
+      artist_id: artist.id,
+      artist_slug: artist.slug,
+      stage: form.stage,
+      event_date: form.event_date || null,
+      market: form.market || null,
+      venue: form.venue || null,
+      buyer: form.buyer || null,
+      buyer_company: form.buyer_company || null,
+      fee_offered: form.fee_offered || null,
+      fee_target: form.fee_target || null,
+      deal_type: form.deal_type,
+      hold_number: form.hold_number ? parseInt(form.hold_number, 10) : null,
+      next_action: form.next_action || null,
+      notes: form.notes || null,
+    };
+    const { data, error } = await supabase.from('pipeline').insert(payload).select().single();
+    if (error) { setErr(error.message); setSaving(false); return; }
+    onAdded(data);
+    onClose();
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6 overflow-y-auto"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl my-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+          <h3 className="text-white font-bold text-lg">Add Deal — {artist.name}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+
+          {/* Stage + Date */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Stage</label>
+              <select value={form.stage} onChange={e => set('stage', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+                {PIPELINE_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Event Date</label>
+              <input type="date" value={form.event_date} onChange={e => set('event_date', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500" />
+            </div>
+          </div>
+
+          {/* Market + Venue */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Market / City</label>
+              <input type="text" value={form.market} onChange={e => set('market', e.target.value)}
+                placeholder="e.g. Miami, FL"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Venue</label>
+              <input type="text" value={form.venue} onChange={e => set('venue', e.target.value)}
+                placeholder="e.g. Club TBD"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+
+          {/* Buyer + Company */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Buyer Contact</label>
+              <input type="text" value={form.buyer} onChange={e => set('buyer', e.target.value)}
+                placeholder="Name / email"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Buyer Company</label>
+              <input type="text" value={form.buyer_company} onChange={e => set('buyer_company', e.target.value)}
+                placeholder="e.g. Domicile Miami"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+
+          {/* Fee Offered + Fee Target */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Fee Offered</label>
+              <input type="text" value={form.fee_offered} onChange={e => set('fee_offered', e.target.value)}
+                placeholder="e.g. $2,500"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Fee Target</label>
+              <input type="text" value={form.fee_target} onChange={e => set('fee_target', e.target.value)}
+                placeholder="e.g. $3,000"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+
+          {/* Deal Type + Hold # */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Deal Type</label>
+              <select value={form.deal_type} onChange={e => set('deal_type', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+                {DEAL_CATEGORIES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Hold #</label>
+              <input type="number" value={form.hold_number} onChange={e => set('hold_number', e.target.value)}
+                placeholder="1" min="1" max="5"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          </div>
+
+          {/* Next Action */}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Next Action</label>
+            <input type="text" value={form.next_action} onChange={e => set('next_action', e.target.value)}
+              placeholder="e.g. Follow up by Thursday"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Notes</label>
+            <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
+              rows={2} placeholder="Any context…"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600 resize-none" />
+          </div>
+
+          {err && <p className="text-red-400 text-xs">{err}</p>}
+
+          <div className="flex items-center justify-end gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-60 transition-colors"
+              style={{ backgroundColor: '#6366F1' }}>
+              {saving ? 'Saving…' : 'Add Deal'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── ADD SHOW MODAL ────────────────────────────────────────────────────────────
 const DEAL_TYPES = ['Confirmed', 'Contracted', 'Advanced', 'Settled'];
 const STATUS_OPTS = ['Active', 'Hold', 'Cancelled'];
@@ -476,6 +646,7 @@ export default function ArtistDetail() {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showDealModal, setShowDealModal] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -667,13 +838,21 @@ export default function ArtistDetail() {
             <section className="mb-6">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-lg font-bold text-white">Current Schedule</h3>
-                <button
-                  onClick={() => setShowModal(true)}
-                  className="flex items-center gap-2 text-sm font-semibold px-4 py-1.5 rounded-lg text-white transition-colors"
-                  style={{ backgroundColor: '#6366F1' }}
-                >
-                  + Add Show
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowDealModal(true)}
+                    className="flex items-center gap-2 text-sm font-semibold px-4 py-1.5 rounded-lg text-white transition-colors border border-indigo-600 hover:bg-indigo-600/20"
+                  >
+                    + Add Deal
+                  </button>
+                  <button
+                    onClick={() => setShowModal(true)}
+                    className="flex items-center gap-2 text-sm font-semibold px-4 py-1.5 rounded-lg text-white transition-colors"
+                    style={{ backgroundColor: '#6366F1' }}
+                  >
+                    + Add Show
+                  </button>
+                </div>
               </div>
               {shows.length === 0 ? (
                 <div className="bg-gray-900 rounded-xl border border-gray-800 px-5 py-8 text-center">
@@ -761,6 +940,21 @@ export default function ArtistDetail() {
                 onAdded={(newShow) => {
                   setShows((prev) =>
                     [...prev, newShow].sort((a, b) =>
+                      (a.event_date || '').localeCompare(b.event_date || '')
+                    )
+                  );
+                }}
+              />
+            )}
+
+            {/* ── ADD DEAL MODAL ── */}
+            {showDealModal && (
+              <AddDealModal
+                artist={artist}
+                onClose={() => setShowDealModal(false)}
+                onAdded={(newDeal) => {
+                  setPipeline(prev =>
+                    [...prev, newDeal].sort((a, b) =>
                       (a.event_date || '').localeCompare(b.event_date || '')
                     )
                   );
