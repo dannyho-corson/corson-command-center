@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import Nav from '../components/Nav';
@@ -27,10 +27,31 @@ function StatusBadge({ status }) {
   );
 }
 
-// ── ADD TARGET MODAL ──────────────────────────────────────────────────────────
-const EMPTY = { promoter: '', contact: '', market: '', outreach_date: '', status: 'To Pitch', notes: '' };
+function DragHandle() {
+  return (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+      <circle cx="5"  cy="4"  r="1.3"/>
+      <circle cx="5"  cy="8"  r="1.3"/>
+      <circle cx="5"  cy="12" r="1.3"/>
+      <circle cx="11" cy="4"  r="1.3"/>
+      <circle cx="11" cy="8"  r="1.3"/>
+      <circle cx="11" cy="12" r="1.3"/>
+    </svg>
+  );
+}
 
-function AddTargetModal({ artistSlug, onClose, onAdded }) {
+function TrashIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+    </svg>
+  );
+}
+
+// ── ADD TARGET MODAL ──────────────────────────────────────────────────────────
+const EMPTY = { promoter: '', contact: '', market: '', outreach_date: '', status: 'Not Started', notes: '' };
+
+function AddTargetModal({ artistSlug, nextOrder, onClose, onAdded }) {
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
@@ -49,6 +70,7 @@ function AddTargetModal({ artistSlug, onClose, onAdded }) {
       outreach_date: form.outreach_date || null,
       status: form.status,
       notes: form.notes || null,
+      priority_order: nextOrder,
     };
     const { data, error } = await supabase.from('targets').insert(payload).select().single();
     if (error) { setErr(error.message); setSaving(false); return; }
@@ -252,17 +274,22 @@ export default function TargetList() {
   const [showModal, setShowModal] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
   const [editTarget, setEditTarget] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const dragId = useRef(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const [aRes, tRes] = await Promise.all([
-          supabase.from('artists').select('id, name, slug, genre, base').eq('slug', slug).single(),
-          supabase.from('targets').select('*').eq('artist_slug', slug).order('outreach_date', { ascending: false }),
-        ]);
+        const aRes = await supabase.from('artists').select('id, name, slug, genre, base').eq('slug', slug).single();
         if (aRes.error) throw aRes.error;
-        if (tRes.error) throw tRes.error;
         setArtist(aRes.data);
+
+        // Try priority_order first; fall back to created_at if column doesn't exist yet
+        let tRes = await supabase.from('targets').select('*').eq('artist_slug', slug).order('priority_order', { ascending: true });
+        if (tRes.error && tRes.error.code === '42703') {
+          tRes = await supabase.from('targets').select('*').eq('artist_slug', slug).order('created_at', { ascending: true });
+        }
+        if (tRes.error) throw tRes.error;
         setTargets(tRes.data);
       } catch (err) {
         setError(err.message);
@@ -285,7 +312,61 @@ export default function TargetList() {
     if (!error) setTargets(prev => prev.map(x => x.id === t.id ? data : x));
   }
 
+  async function deleteTarget(t, e) {
+    e.stopPropagation();
+    if (!window.confirm('Delete this target?')) return;
+    const { error } = await supabase.from('targets').delete().eq('id', t.id);
+    if (!error) setTargets(prev => prev.filter(x => x.id !== t.id));
+  }
+
+  // ── Drag-to-reorder (only when no status filter is active) ──
+  function handleDragStart(e, t) {
+    dragId.current = t.id;
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function handleDragOver(e, t) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (t.id !== dragId.current) setDragOverId(t.id);
+  }
+
+  function handleDragLeave(e) {
+    // Only clear if leaving the row entirely (not entering a child)
+    if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null);
+  }
+
+  async function handleDrop(e, dropTarget) {
+    e.preventDefault();
+    setDragOverId(null);
+    if (!dragId.current || dragId.current === dropTarget.id) return;
+
+    const newTargets = [...targets];
+    const fromIdx = newTargets.findIndex(t => t.id === dragId.current);
+    const toIdx   = newTargets.findIndex(t => t.id === dropTarget.id);
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    const [moved] = newTargets.splice(fromIdx, 1);
+    newTargets.splice(toIdx, 0, moved);
+    dragId.current = null;
+
+    setTargets(newTargets);
+
+    // Persist new priority_order for all rows
+    await Promise.all(
+      newTargets.map((t, i) =>
+        supabase.from('targets').update({ priority_order: i }).eq('id', t.id)
+      )
+    );
+  }
+
+  function handleDragEnd() {
+    dragId.current = null;
+    setDragOverId(null);
+  }
+
   const filtered = filterStatus ? targets.filter(t => t.status === filterStatus) : targets;
+  const canDrag  = !filterStatus;
 
   // Status counts for filter pills
   const counts = STATUS_OPTIONS.reduce((acc, s) => {
@@ -382,7 +463,8 @@ export default function TargetList() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-800">
-                  {['Promoter', 'Contact', 'Market', 'Outreach Date', 'Status', 'Notes'].map(h => (
+                  {canDrag && <th className="w-8" />}
+                  {['Promoter', 'Contact', 'Market', 'Outreach Date', 'Status', 'Notes', ''].map(h => (
                     <th key={h} className="text-left text-gray-500 text-xs font-semibold uppercase tracking-wider px-5 py-3">{h}</th>
                   ))}
                 </tr>
@@ -390,16 +472,32 @@ export default function TargetList() {
               <tbody>
                 {filtered.map(t => {
                   const rowBg =
-                    t.status === 'Confirmed' ? 'bg-emerald-950/10 hover:bg-emerald-950/20' :
-                    t.status === 'Active' || t.status === 'Warm' ? 'bg-yellow-950/10 hover:bg-yellow-950/20' :
-                    t.status === 'Dead' ? 'bg-red-950/10 hover:bg-red-950/20' :
+                    t.status === 'Confirmed'                          ? 'bg-emerald-950/10 hover:bg-emerald-950/20' :
+                    t.status === 'Active' || t.status === 'Warm'     ? 'bg-yellow-950/10 hover:bg-yellow-950/20' :
+                    t.status === 'Dead'                               ? 'bg-red-950/10 hover:bg-red-950/20' :
                     'hover:bg-gray-800/40';
                   const fmtOutreach = t.outreach_date
                     ? new Date(t.outreach_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                     : '—';
+                  const isDragOver = dragOverId === t.id;
                   return (
-                    <tr key={t.id} onClick={() => setEditTarget(t)}
-                      className={`border-b border-gray-800 last:border-0 transition-colors cursor-pointer ${rowBg}`}>
+                    <tr
+                      key={t.id}
+                      draggable={canDrag}
+                      onDragStart={e => handleDragStart(e, t)}
+                      onDragOver={e => handleDragOver(e, t)}
+                      onDragLeave={handleDragLeave}
+                      onDrop={e => handleDrop(e, t)}
+                      onDragEnd={handleDragEnd}
+                      onClick={() => setEditTarget(t)}
+                      className={`border-b border-gray-800 last:border-0 transition-colors cursor-pointer ${rowBg} ${isDragOver ? 'border-t-2 border-t-indigo-500' : ''}`}
+                    >
+                      {canDrag && (
+                        <td className="pl-3 pr-0 py-3.5 text-gray-600 hover:text-gray-400 cursor-grab active:cursor-grabbing"
+                          onClick={e => e.stopPropagation()}>
+                          <DragHandle />
+                        </td>
+                      )}
                       <td className="px-5 py-3.5 text-white font-semibold">{t.promoter}</td>
                       <td className="px-5 py-3.5 text-gray-400">{t.contact || '—'}</td>
                       <td className="px-5 py-3.5 text-gray-300">{t.market || '—'}</td>
@@ -413,6 +511,15 @@ export default function TargetList() {
                         </button>
                       </td>
                       <td className="px-5 py-3.5 text-gray-500 max-w-xs truncate">{t.notes || '—'}</td>
+                      <td className="px-3 py-3.5">
+                        <button
+                          onClick={e => deleteTarget(t, e)}
+                          title="Delete target"
+                          className="text-gray-600 hover:text-red-400 transition-colors p-1 rounded"
+                        >
+                          <TrashIcon />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -433,8 +540,9 @@ export default function TargetList() {
       {showModal && (
         <AddTargetModal
           artistSlug={slug}
+          nextOrder={targets.length}
           onClose={() => setShowModal(false)}
-          onAdded={t => setTargets(prev => [t, ...prev])}
+          onAdded={t => setTargets(prev => [...prev, t])}
         />
       )}
 
