@@ -66,18 +66,22 @@ const MONTH_STATUS_STYLE = {
 // ── PAGE ──────────────────────────────────────────────────────────────────────
 export default function Financials() {
   const [shows, setShows] = useState([]);
+  const [artistNames, setArtistNames] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const { data, error } = await supabase
-          .from('shows')
-          .select('*, artists(name)')
-          .order('event_date');
-        if (error) throw error;
-        setShows(data || []);
+        const [showsRes, artistsRes] = await Promise.all([
+          supabase.from('shows').select('*').order('event_date'),
+          supabase.from('artists').select('slug, name'),
+        ]);
+        if (showsRes.error) throw showsRes.error;
+        if (artistsRes.error) throw artistsRes.error;
+        setShows(showsRes.data || []);
+        const nameMap = Object.fromEntries((artistsRes.data || []).map(a => [a.slug, a.name]));
+        setArtistNames(nameMap);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -231,7 +235,7 @@ export default function Financials() {
                       <tr key={show.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30 transition-colors">
                         <td className="px-5 py-3.5">
                           <Link to={`/artists/${show.artist_slug}`} className="text-white font-semibold hover:text-indigo-300 transition-colors">
-                            {show.artists?.name || show.artist_slug}
+                            {artistNames[show.artist_slug] || show.artist_slug}
                           </Link>
                         </td>
                         <td className="px-5 py-3.5 text-gray-400 whitespace-nowrap">{fmtDate(show)}</td>
