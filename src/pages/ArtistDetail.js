@@ -1,7 +1,40 @@
 import { useState, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { logActivity } from '../lib/activityLog';
 import Nav from '../components/Nav';
+
+// ── RELATIVE TIME ─────────────────────────────────────────────────────────────
+function relativeTime(ts) {
+  const diff = Date.now() - new Date(ts).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const ACTION_ICON = {
+  show_added:    { icon: '🎤', color: 'text-emerald-400' },
+  deal_added:    { icon: '📋', color: 'text-yellow-400' },
+  stage_changed: { icon: '🔄', color: 'text-indigo-400' },
+};
+
+function ActivityEntry({ entry }) {
+  const { icon, color } = ACTION_ICON[entry.action] || { icon: '•', color: 'text-gray-400' };
+  return (
+    <div className="flex items-start gap-3 py-3 border-b border-gray-800 last:border-0">
+      <span className={`text-base flex-shrink-0 ${color}`}>{icon}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-gray-300 text-sm leading-snug">{entry.description}</p>
+      </div>
+      <span className="text-gray-600 text-xs flex-shrink-0 whitespace-nowrap">{relativeTime(entry.created_at)}</span>
+    </div>
+  );
+}
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 function parseFee(feeStr) {
@@ -647,14 +680,16 @@ export default function ArtistDetail() {
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDealModal, setShowDealModal] = useState(false);
+  const [activityLog, setActivityLog] = useState([]);
 
   useEffect(() => {
     async function load() {
       try {
-        const [artistRes, showsRes, pipelineRes] = await Promise.all([
+        const [artistRes, showsRes, pipelineRes, activityRes] = await Promise.all([
           supabase.from('artists').select('*').eq('slug', slug).single(),
           supabase.from('shows').select('*').eq('artist_slug', slug).order('event_date'),
           supabase.from('pipeline').select('*').eq('artist_slug', slug).order('event_date'),
+          supabase.from('activity_log').select('*').eq('artist_slug', slug).order('created_at', { ascending: false }).limit(50),
         ]);
 
         if (artistRes.error) throw artistRes.error;
@@ -664,6 +699,7 @@ export default function ArtistDetail() {
         setArtist(artistRes.data);
         setShows(showsRes.data);
         setPipeline(pipelineRes.data);
+        if (!activityRes.error) setActivityLog(activityRes.data || []);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -919,6 +955,18 @@ export default function ArtistDetail() {
               )}
             </section>
 
+            {/* ── ACTIVITY LOG ── */}
+            <section className="mb-8">
+              <h3 className="text-lg font-bold text-white mb-3">Activity</h3>
+              <div className="bg-gray-900 rounded-xl border border-gray-800 px-5">
+                {activityLog.length === 0 ? (
+                  <p className="text-gray-600 text-sm py-8 text-center">No activity recorded yet.</p>
+                ) : (
+                  activityLog.map(entry => <ActivityEntry key={entry.id} entry={entry} />)
+                )}
+              </div>
+            </section>
+
             {/* ── ACTION BUTTONS ── */}
             <div className="flex flex-wrap gap-3">
               <Link to={`/artists/${slug}/targets`} className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm border border-indigo-600 text-indigo-300 hover:bg-indigo-600 hover:text-white transition-colors">
@@ -943,6 +991,12 @@ export default function ArtistDetail() {
                       (a.event_date || '').localeCompare(b.event_date || '')
                     )
                   );
+                  const desc = `Show added: ${newShow.venue || ''}${newShow.city ? ` in ${newShow.city}` : ''}${newShow.event_date ? ` on ${newShow.event_date}` : ''}`.trim();
+                  logActivity(artist.slug, 'show_added', desc);
+                  setActivityLog(prev => [{
+                    id: `tmp-${Date.now()}`, artist_slug: artist.slug,
+                    action: 'show_added', description: desc, created_at: new Date().toISOString(),
+                  }, ...prev]);
                 }}
               />
             )}
@@ -958,6 +1012,12 @@ export default function ArtistDetail() {
                       (a.event_date || '').localeCompare(b.event_date || '')
                     )
                   );
+                  const desc = `Deal added: ${newDeal.stage}${newDeal.venue ? ` — ${newDeal.venue}` : ''}${newDeal.market ? ` in ${newDeal.market}` : ''}${newDeal.fee_offered ? ` (${newDeal.fee_offered})` : ''}`;
+                  logActivity(artist.slug, 'deal_added', desc);
+                  setActivityLog(prev => [{
+                    id: `tmp-${Date.now()}`, artist_slug: artist.slug,
+                    action: 'deal_added', description: desc, created_at: new Date().toISOString(),
+                  }, ...prev]);
                 }}
               />
             )}

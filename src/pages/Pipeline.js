@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { logActivity } from '../lib/activityLog';
 import Nav from '../components/Nav';
 
 // ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
@@ -391,6 +392,11 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
     }
     setSaving(false);
     if (error) { setErr(error.message); return; }
+    const oldStage = deal.stage || deal.deal_type;
+    if (form.stage !== oldStage) {
+      const label = deal.venue || deal.market || deal.city || 'Deal';
+      logActivity(deal.artist_slug, 'stage_changed', `${label}: ${oldStage} → ${form.stage}`);
+    }
     setSaved(true);
     onUpdated({ ...deal, ...form });
   }

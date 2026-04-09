@@ -69,3 +69,21 @@ create table if not exists reminders (
 -- Enable Row Level Security (recommended for production)
 -- alter table reminders enable row level security;
 -- create policy "allow all" on reminders for all using (true);
+
+-- ── activity_log table ────────────────────────────────────────────────────────
+-- Auto-logged on: show added, deal added, stage changed.
+-- Displayed on each artist detail page under "Activity".
+
+create table if not exists activity_log (
+  id uuid primary key default gen_random_uuid(),
+  artist_slug text not null,
+  action text not null check (action in ('show_added', 'deal_added', 'stage_changed')),
+  description text,
+  created_at timestamptz default now()
+);
+
+create index if not exists activity_log_artist_slug_idx on activity_log (artist_slug, created_at desc);
+
+-- Enable Row Level Security (recommended for production)
+-- alter table activity_log enable row level security;
+-- create policy "allow all" on activity_log for all using (true);
