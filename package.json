@@ -42,10 +42,12 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.87.0",
+    "@azure/msal-node": "^5.1.2",
     "@kenjiuno/msgreader": "^1.28.0",
     "autoprefixer": "^10.4.27",
     "dotenv": "^17.4.1",
     "mailparser": "^3.9.8",
+    "node-fetch": "^3.3.2",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
     "xlsx": "^0.18.5"
