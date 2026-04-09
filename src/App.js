@@ -8,6 +8,7 @@ import TargetList from './pages/TargetList';
 import TouringGrid from './pages/TouringGrid';
 import Rolodex from './pages/Rolodex';
 import Financials from './pages/Financials';
+import ArtistShare from './pages/ArtistShare';
 import Nav from './components/Nav';
 import { supabase } from './lib/supabase';
 
@@ -438,6 +439,7 @@ function App() {
         <Route path="/pipeline" element={<Pipeline />} />
         <Route path="/rolodex" element={<Rolodex />} />
         <Route path="/financials" element={<Financials />} />
+        <Route path="/share/:slug" element={<ArtistShare />} />
       </Routes>
     </BrowserRouter>
   );
