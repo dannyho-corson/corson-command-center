@@ -287,8 +287,227 @@ function fmtDate(eventDate, notes) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// ── PIPELINE STAGES for editing ───────────────────────────────────────────────
+const EDIT_STAGES = ['Inquiry', 'Request', 'Offer In', 'Negotiating', 'Confirmed', 'Contracted', 'Advanced', 'Settled'];
+
+// ── SET REMINDER MODAL ────────────────────────────────────────────────────────
+function SetReminderModal({ deal, artistName, onClose, onSaved }) {
+  const today = new Date().toISOString().split('T')[0];
+  const [date, setDate] = useState(today);
+  const [note, setNote] = useState(deal.next_action || '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!date) { setErr('Date is required.'); return; }
+    setSaving(true); setErr(null);
+    const { data, error } = await supabase.from('reminders').insert({
+      artist_slug: deal.artist_slug,
+      deal_note: note || null,
+      reminder_date: date,
+      completed: false,
+    }).select().single();
+    if (error) { setErr(error.message); setSaving(false); return; }
+    onSaved(data);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-4"
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <h3 className="text-white font-bold text-base">Set Reminder</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-5 py-4 space-y-3">
+          <p className="text-gray-500 text-xs">{artistName} · {deal.market || deal.city || deal.venue || 'Deal'}</p>
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Remind me on</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500" required />
+          </div>
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Note</label>
+            <textarea value={note} onChange={e => setNote(e.target.value)}
+              rows={2} placeholder="What needs to happen…"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600 resize-none" />
+          </div>
+          {err && <p className="text-red-400 text-xs">{err}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose}
+              className="text-gray-400 text-sm px-4 py-2 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-60"
+              style={{ backgroundColor: '#6366F1' }}>
+              {saving ? 'Saving…' : 'Save Reminder'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── DEAL DETAIL PANEL ─────────────────────────────────────────────────────────
+const PANEL_STAGES = ['Inquiry', 'Request', 'Offer In', 'Negotiating', 'Confirmed', 'Contracted', 'Advanced', 'Settled'];
+
+function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
+  const artistName = artistNames[deal.artist_slug] || deal.artist_slug;
+  const isPipeline = !!deal.stage; // pipeline deals have stage, shows have deal_type
+
+  const [form, setForm] = useState({
+    stage:       deal.stage || deal.deal_type || '',
+    fee_offered: deal.fee_offered || deal.fee || '',
+    next_action: deal.next_action || '',
+    notes:       deal.notes || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState(null);
+  const [showReminder, setShowReminder] = useState(false);
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); setSaved(false); }
+
+  async function handleSave() {
+    setSaving(true); setErr(null);
+    let error;
+    if (isPipeline) {
+      ({ error } = await supabase.from('pipeline').update({
+        stage:       form.stage,
+        fee_offered: form.fee_offered || null,
+        next_action: form.next_action || null,
+        notes:       form.notes || null,
+      }).eq('id', deal.id));
+    } else {
+      ({ error } = await supabase.from('shows').update({
+        deal_type: form.stage,
+        fee:       form.fee_offered || null,
+        notes:     form.notes || null,
+      }).eq('id', deal.id));
+    }
+    setSaving(false);
+    if (error) { setErr(error.message); return; }
+    setSaved(true);
+    onUpdated({ ...deal, ...form });
+  }
+
+  const date = fmtDate(deal.event_date, deal.notes);
+  const location = deal.market || deal.city || '—';
+  const buyer = deal.buyer_company || deal.buyer || deal.promoter || '—';
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
+
+      {/* Panel */}
+      <div className="fixed right-0 top-0 h-full w-full max-w-md z-50 bg-gray-900 border-l border-gray-700 shadow-2xl flex flex-col overflow-y-auto"
+        style={{ animation: 'slideInRight 0.2s ease-out' }}>
+        {/* Header */}
+        <div className="flex items-start justify-between px-6 py-5 border-b border-gray-800">
+          <div>
+            <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">{artistName}</p>
+            <h3 className="text-white font-bold text-lg leading-tight">
+              {deal.venue || location || 'Deal Details'}
+            </h3>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-2xl leading-none mt-0.5">×</button>
+        </div>
+
+        {/* Read-only details */}
+        <div className="px-6 py-4 border-b border-gray-800 grid grid-cols-2 gap-3 text-xs">
+          {[
+            ['Date', date],
+            ['Market', location],
+            ['Buyer', buyer],
+            ['Hold #', deal.hold_number || '—'],
+            ['Deal Type', deal.deal_type || '—'],
+          ].map(([label, val]) => (
+            <div key={label}>
+              <p className="text-gray-600 uppercase tracking-wider mb-0.5">{label}</p>
+              <p className="text-gray-300">{val}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Editable fields */}
+        <div className="px-6 py-5 space-y-4 flex-1">
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Stage</label>
+            <select value={form.stage} onChange={e => set('stage', e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+              {PANEL_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">
+              {isPipeline ? 'Fee Offered' : 'Fee'}
+            </label>
+            <input type="text" value={form.fee_offered} onChange={e => set('fee_offered', e.target.value)}
+              placeholder="e.g. $2,500"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+          </div>
+          {isPipeline && (
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Next Action</label>
+              <input type="text" value={form.next_action} onChange={e => set('next_action', e.target.value)}
+                placeholder="e.g. Follow up by Thursday"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+            </div>
+          )}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Notes</label>
+            <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
+              rows={3}
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600 resize-none" />
+          </div>
+
+          {err && <p className="text-red-400 text-xs">{err}</p>}
+        </div>
+
+        {/* Footer actions */}
+        <div className="px-6 py-4 border-t border-gray-800 flex items-center justify-between gap-3">
+          <button onClick={() => setShowReminder(true)}
+            className="text-indigo-400 text-sm font-semibold px-4 py-2 rounded-lg border border-indigo-700 hover:bg-indigo-900/30 transition-colors">
+            Set Reminder
+          </button>
+          <div className="flex items-center gap-2">
+            {saved && <span className="text-emerald-400 text-xs">Saved</span>}
+            <button onClick={handleSave} disabled={saving}
+              className="text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-60 transition-colors"
+              style={{ backgroundColor: '#6366F1' }}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Reminder sub-modal */}
+      {showReminder && (
+        <SetReminderModal
+          deal={deal}
+          artistName={artistName}
+          onClose={() => setShowReminder(false)}
+          onSaved={() => setShowReminder(false)}
+        />
+      )}
+
+      <style>{`
+        @keyframes slideInRight {
+          from { transform: translateX(100%); opacity: 0; }
+          to   { transform: translateX(0);    opacity: 1; }
+        }
+      `}</style>
+    </>
+  );
+}
+
 // ── DEAL CARD ─────────────────────────────────────────────────────────────────
-function DealCard({ deal, col, artistNames }) {
+function DealCard({ deal, col, artistNames, onCardClick }) {
   const artistName = artistNames[deal.artist_slug] || deal.artist_slug;
   const date = fmtDate(deal.event_date, deal.notes);
   const location = deal.market || deal.city || '—';
@@ -296,16 +515,20 @@ function DealCard({ deal, col, artistNames }) {
   const buyer = deal.buyer_company || deal.buyer || deal.promoter || '—';
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-gray-600 transition-colors">
+    <div
+      onClick={() => onCardClick(deal)}
+      className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-800/40 transition-colors cursor-pointer"
+    >
       {/* Artist name */}
       <Link
         to={`/artists/${deal.artist_slug}`}
+        onClick={e => e.stopPropagation()}
         className="text-white font-bold text-sm hover:text-indigo-300 transition-colors block mb-2"
       >
         {artistName}
       </Link>
 
-      {/* Stage sub-label (shows the actual stage within the column) */}
+      {/* Stage sub-label */}
       {deal.stage || deal.deal_type ? (
         <span className={`text-xs font-semibold px-1.5 py-0.5 rounded border mb-3 inline-block ${col.headerBg} ${col.headerText} border-current/30`}>
           {deal.stage || deal.deal_type}
@@ -338,12 +561,15 @@ function DealCard({ deal, col, artistNames }) {
           {fee}
         </div>
       )}
+
+      {/* Click hint */}
+      <div className="mt-2 text-gray-700 text-xs">Click to edit →</div>
     </div>
   );
 }
 
 // ── KANBAN COLUMN ─────────────────────────────────────────────────────────────
-function KanbanColumn({ col, deals, artistNames }) {
+function KanbanColumn({ col, deals, artistNames, onCardClick }) {
   return (
     <div className={`flex-1 min-w-[220px] max-w-xs flex flex-col rounded-xl border-t-2 ${col.accent} bg-gray-900/50`}>
       {/* Column header */}
@@ -367,7 +593,7 @@ function KanbanColumn({ col, deals, artistNames }) {
           </div>
         ) : (
           deals.map((deal) => (
-            <DealCard key={deal.id} deal={deal} col={col} artistNames={artistNames} />
+            <DealCard key={deal.id} deal={deal} col={col} artistNames={artistNames} onCardClick={onCardClick} />
           ))
         )}
       </div>
@@ -384,6 +610,18 @@ export default function Pipeline() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showAddDeal, setShowAddDeal] = useState(false);
+  const [selectedDeal, setSelectedDeal] = useState(null);
+
+  function handleCardClick(deal) { setSelectedDeal(deal); }
+
+  function handleDealUpdated(updated) {
+    if (pipelineDeals.find(d => d.id === updated.id)) {
+      setPipelineDeals(prev => prev.map(d => d.id === updated.id ? { ...d, ...updated } : d));
+    } else {
+      setShows(prev => prev.map(s => s.id === updated.id ? { ...s, ...updated } : s));
+    }
+    setSelectedDeal(prev => prev && prev.id === updated.id ? { ...prev, ...updated } : prev);
+  }
 
   useEffect(() => {
     async function load() {
@@ -527,11 +765,21 @@ export default function Pipeline() {
                 col={col}
                 deals={col.deals}
                 artistNames={artistNames}
+                onCardClick={handleCardClick}
               />
             ))}
           </div>
         )}
       </main>
+
+      {selectedDeal && (
+        <DealDetailPanel
+          deal={selectedDeal}
+          artistNames={artistNames}
+          onClose={() => setSelectedDeal(null)}
+          onUpdated={handleDealUpdated}
+        />
+      )}
     </div>
   );
 }

@@ -52,3 +52,20 @@ create table if not exists buyers (
 -- Enable Row Level Security (recommended for production)
 -- alter table buyers enable row level security;
 -- create policy "allow all" on buyers for all using (true);
+
+-- ── reminders table ───────────────────────────────────────────────────────────
+-- Pipeline deal follow-up reminders. Set via "Set Reminder" on deal cards.
+-- Dashboard shows reminders where reminder_date <= today AND completed = false.
+
+create table if not exists reminders (
+  id uuid primary key default gen_random_uuid(),
+  artist_slug text not null,
+  deal_note text,
+  reminder_date date not null,
+  completed boolean not null default false,
+  created_at timestamptz default now()
+);
+
+-- Enable Row Level Security (recommended for production)
+-- alter table reminders enable row level security;
+-- create policy "allow all" on reminders for all using (true);

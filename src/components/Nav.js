@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 
 const NAV_LINKS = [
   { to: '/',           label: 'Dashboard' },
@@ -12,6 +13,17 @@ const NAV_LINKS = [
 export default function Nav() {
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
+  const [reminderCount, setReminderCount] = useState(0);
+
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    supabase
+      .from('reminders')
+      .select('id', { count: 'exact', head: true })
+      .lte('reminder_date', today)
+      .eq('completed', false)
+      .then(({ count }) => { if (count) setReminderCount(count); });
+  }, []);
 
   function isActive(to) {
     if (to === '/') return pathname === '/';
@@ -49,13 +61,18 @@ export default function Nav() {
               <Link
                 key={to}
                 to={to}
-                className={`text-sm px-3 py-1.5 rounded-lg transition-colors ${
+                className={`relative text-sm px-3 py-1.5 rounded-lg transition-colors ${
                   isActive(to)
                     ? 'bg-gray-800 text-white'
                     : 'text-gray-400 hover:text-white hover:bg-gray-800'
                 }`}
               >
                 {label}
+                {to === '/pipeline' && reminderCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center leading-none">
+                    {reminderCount > 9 ? '9+' : reminderCount}
+                  </span>
+                )}
               </Link>
             ))}
           </div>

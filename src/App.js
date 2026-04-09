@@ -130,6 +130,10 @@ function Dashboard() {
   const [resolvedIds, setResolvedIds] = useState(() => loadResolvedFromLS());
   const [resolving, setResolving] = useState(null); // id being resolved
 
+  // Due Today reminders
+  const [dueReminders, setDueReminders] = useState([]);
+  const [dismissedReminders, setDismissedReminders] = useState(new Set());
+
   // Quick Notes — localStorage only
   const [notes, setNotes] = useState(() => {
     try { return localStorage.getItem('ccc_quick_notes') || ''; } catch { return ''; }
@@ -147,15 +151,18 @@ function Dashboard() {
   useEffect(() => {
     async function load() {
       try {
-        const [artistRes, showsRes, pipelineRes] = await Promise.all([
+        const today = new Date().toISOString().split('T')[0];
+        const [artistRes, showsRes, pipelineRes, remindersRes] = await Promise.all([
           supabase.from('artists').select('id, name, slug, category'),
           supabase.from('shows').select('artist_slug, fee, deal_type, venue, city, promoter, event_date, notes'),
           supabase.from('pipeline').select('artist_slug, stage, fee_offered, venue, market, buyer, buyer_company, event_date, notes'),
+          supabase.from('reminders').select('*').lte('reminder_date', today).eq('completed', false),
         ]);
 
         if (artistRes.error) throw artistRes.error;
         if (showsRes.error) throw showsRes.error;
         if (pipelineRes.error) throw pipelineRes.error;
+        if (!remindersRes.error) setDueReminders(remindersRes.data || []);
 
         const artists = artistRes.data;
         const shows = showsRes.data;
@@ -281,6 +288,45 @@ function Dashboard() {
             : kpis.map((kpi) => <KpiCard key={kpi.label} kpi={kpi} />)
           }
         </section>
+
+        {/* ── DUE TODAY ── */}
+        {dueReminders.filter(r => !dismissedReminders.has(r.id)).length > 0 && (
+          <section className="mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <h3 className="text-lg font-bold text-white">Due Today</h3>
+              <span className="bg-indigo-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                {dueReminders.filter(r => !dismissedReminders.has(r.id)).length}
+              </span>
+            </div>
+            <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+              {dueReminders.filter(r => !dismissedReminders.has(r.id)).map((r, i, arr) => (
+                <div
+                  key={r.id}
+                  className={`flex items-start gap-4 px-5 py-4 bg-indigo-950/20 ${i < arr.length - 1 ? 'border-b border-gray-800' : ''}`}
+                >
+                  <div className="w-1 self-stretch rounded-full flex-shrink-0 bg-indigo-500" />
+                  <div className="flex flex-col gap-1 flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-indigo-300 text-xs font-bold uppercase tracking-wider">Reminder</span>
+                      <span className="text-white font-bold text-sm">{r.artist_slug}</span>
+                    </div>
+                    {r.deal_note && <p className="text-gray-400 text-sm leading-relaxed">{r.deal_note}</p>}
+                    <p className="text-gray-600 text-xs">Due: {r.reminder_date}</p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      setDismissedReminders(prev => new Set([...prev, r.id]));
+                      await supabase.from('reminders').update({ completed: true }).eq('id', r.id);
+                    }}
+                    className="flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-indigo-700 text-indigo-400 hover:bg-indigo-700 hover:text-white transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* ── URGENT ISSUES ── */}
         <section className="mb-8">

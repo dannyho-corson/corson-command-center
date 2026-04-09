@@ -157,7 +157,15 @@ export default function ArtistShare() {
             </div>
             <span className="text-white font-bold text-sm tracking-widest uppercase">Corson Agency</span>
           </div>
-          <span className="text-gray-600 text-xs tracking-wider hidden sm:block">Artist Overview</span>
+          <div className="flex items-center gap-3">
+            <span className="text-gray-600 text-xs tracking-wider hidden sm:block">Artist Overview</span>
+            <button
+              onClick={() => window.print()}
+              className="no-print text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
+            >
+              Download PDF
+            </button>
+          </div>
         </div>
       </header>
 
@@ -296,6 +304,13 @@ export default function ArtistShare() {
         </div>
       </footer>
 
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          body { background: white !important; color: black !important; }
+          * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      `}</style>
     </div>
   );
 }
