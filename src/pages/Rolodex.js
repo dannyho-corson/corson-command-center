@@ -152,8 +152,46 @@ function AddBuyerModal({ onClose, onAdded }) {
   );
 }
 
+// ── INLINE STATUS SELECT ──────────────────────────────────────────────────────
+const STATUS_SELECT_STYLE = {
+  Active:     'bg-emerald-900 text-emerald-300 border-emerald-700',
+  Warm:       'bg-yellow-900 text-yellow-300 border-yellow-700',
+  Cold:       'bg-gray-800 text-gray-400 border-gray-600',
+  Graveyard:  'bg-gray-900 text-gray-600 border-gray-800',
+  'Red Flag': 'bg-red-900 text-red-300 border-red-700',
+};
+
+function StatusSelect({ buyerId, status, onChange }) {
+  const [saving, setSaving] = useState(false);
+  const cls = STATUS_SELECT_STYLE[status] || STATUS_SELECT_STYLE['Cold'];
+
+  async function handleChange(e) {
+    e.stopPropagation();
+    const newStatus = e.target.value;
+    setSaving(true);
+    await supabase.from('buyers').update({ status: newStatus }).eq('id', buyerId);
+    setSaving(false);
+    onChange(buyerId, newStatus);
+  }
+
+  return (
+    <select
+      value={status}
+      onChange={handleChange}
+      onClick={e => e.stopPropagation()}
+      disabled={saving}
+      className={`text-xs font-semibold px-2 py-0.5 rounded border cursor-pointer focus:outline-none disabled:opacity-60 ${cls}`}
+      style={{ backgroundColor: 'inherit' }}
+    >
+      {STATUS_OPTIONS.map(s => (
+        <option key={s} value={s} className="bg-gray-900 text-white">{s === 'Red Flag' ? '🔴 Red Flag' : s}</option>
+      ))}
+    </select>
+  );
+}
+
 // ── BUYER ROW (expandable) ────────────────────────────────────────────────────
-function BuyerRow({ buyer }) {
+function BuyerRow({ buyer, onStatusChange }) {
   const [expanded, setExpanded] = useState(false);
   const style = STATUS_STYLE[buyer.status] || STATUS_STYLE['Cold'];
 
@@ -183,7 +221,9 @@ function BuyerRow({ buyer }) {
             : <span className="text-gray-600">—</span>
           }
         </td>
-        <td className="px-5 py-3.5"><StatusBadge status={buyer.status} /></td>
+        <td className="px-5 py-3.5" onClick={e => e.stopPropagation()}>
+          <StatusSelect buyerId={buyer.id} status={buyer.status} onChange={onStatusChange} />
+        </td>
         <td className="px-5 py-3.5 text-gray-500 text-xs max-w-[160px] truncate">{buyer.artists_worked || '—'}</td>
         <td className="px-5 py-3.5 text-gray-500 text-xs max-w-[200px] truncate">{buyer.notes || '—'}</td>
         <td className="px-5 py-3.5 text-gray-600 text-xs">{expanded ? '▲' : '▼'}</td>
@@ -265,6 +305,10 @@ export default function Rolodex() {
     }
     return rows;
   }, [buyers, filterStatus, search]);
+
+  function handleStatusChange(id, newStatus) {
+    setBuyers(prev => prev.map(b => b.id === id ? { ...b, status: newStatus } : b));
+  }
 
   const counts = STATUS_OPTIONS.reduce((acc, s) => {
     acc[s] = buyers.filter(b => b.status === s).length;
@@ -366,7 +410,7 @@ export default function Rolodex() {
               </thead>
               <tbody>
                 {filtered.map(buyer => (
-                  <BuyerRow key={buyer.id} buyer={buyer} />
+                  <BuyerRow key={buyer.id} buyer={buyer} onStatusChange={handleStatusChange} />
                 ))}
               </tbody>
             </table>

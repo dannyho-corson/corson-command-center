@@ -49,6 +49,12 @@ export default function Nav() {
             >
               Rolodex
             </Link>
+            <Link
+              to="/financials"
+              className="text-gray-400 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors"
+            >
+              Financials
+            </Link>
           </div>
         </div>
 

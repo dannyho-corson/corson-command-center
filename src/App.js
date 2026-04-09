@@ -7,6 +7,7 @@ import Pipeline from './pages/Pipeline';
 import TargetList from './pages/TargetList';
 import TouringGrid from './pages/TouringGrid';
 import Rolodex from './pages/Rolodex';
+import Financials from './pages/Financials';
 import Nav from './components/Nav';
 import { supabase } from './lib/supabase';
 
@@ -127,6 +128,18 @@ function Dashboard() {
   // Resolved issues — persisted to Supabase if table exists, else localStorage
   const [resolvedIds, setResolvedIds] = useState(() => loadResolvedFromLS());
   const [resolving, setResolving] = useState(null); // id being resolved
+
+  // Quick Notes — localStorage only
+  const [notes, setNotes] = useState(() => {
+    try { return localStorage.getItem('ccc_quick_notes') || ''; } catch { return ''; }
+  });
+  const [notesSaved, setNotesSaved] = useState(false);
+  function handleNotesChange(val) {
+    setNotes(val);
+    setNotesSaved(false);
+    try { localStorage.setItem('ccc_quick_notes', val); } catch {}
+    setNotesSaved(true);
+  }
 
   const urgentIssues = SEED_ISSUES.filter((i) => !resolvedIds.has(i.id));
 
@@ -325,6 +338,23 @@ function Dashboard() {
           </div>
         </section>
 
+        {/* ── QUICK NOTES ── */}
+        <section className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-bold text-white">Quick Notes</h3>
+            {notesSaved && <span className="text-gray-600 text-xs">Saved</span>}
+          </div>
+          <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+            <textarea
+              value={notes}
+              onChange={e => handleNotesChange(e.target.value)}
+              placeholder="Scratch pad — jot reminders, follow-ups, anything. Saves automatically to this browser."
+              rows={5}
+              className="w-full bg-transparent text-gray-300 text-sm px-5 py-4 focus:outline-none placeholder-gray-700 resize-none leading-relaxed"
+            />
+          </div>
+        </section>
+
         {/* ── PIPELINE SNAPSHOT ── */}
         <section>
           <div className="flex items-center justify-between mb-4">
@@ -407,6 +437,7 @@ function App() {
         <Route path="/artists/:slug/grid" element={<TouringGrid />} />
         <Route path="/pipeline" element={<Pipeline />} />
         <Route path="/rolodex" element={<Rolodex />} />
+        <Route path="/financials" element={<Financials />} />
       </Routes>
     </BrowserRouter>
   );
