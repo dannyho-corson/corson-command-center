@@ -288,9 +288,6 @@ function fmtDate(eventDate, notes) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// ── PIPELINE STAGES for editing ───────────────────────────────────────────────
-const EDIT_STAGES = ['Inquiry', 'Request', 'Offer In', 'Negotiating', 'Confirmed', 'Contracted', 'Advanced', 'Settled'];
-
 // ── SET REMINDER MODAL ────────────────────────────────────────────────────────
 function SetReminderModal({ deal, artistName, onClose, onSaved }) {
   const today = new Date().toISOString().split('T')[0];

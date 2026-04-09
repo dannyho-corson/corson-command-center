@@ -14,14 +14,6 @@ const STATUS_STYLE = {
   'Red Flag': { badge: 'bg-red-900 text-red-300 border-red-700',            dot: 'bg-red-500' },
 };
 
-function StatusBadge({ status }) {
-  const style = STATUS_STYLE[status] || STATUS_STYLE['Cold'];
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${style.badge}`}>
-      {status === 'Red Flag' ? '🔴 Red Flag' : status}
-    </span>
-  );
-}
 
 // ── ADD BUYER MODAL ───────────────────────────────────────────────────────────
 const EMPTY_BUYER = {
