@@ -21,3 +21,8 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Email sync — secrets and runtime files
+scripts/.env
+scripts/.processed-emails.json
+scripts/sync-log.txt
