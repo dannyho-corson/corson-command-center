@@ -862,13 +862,49 @@ export default function ArtistDetail() {
             <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-6">
               <div className="relative flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
 
-                {/* Edit button */}
-                <button
-                  onClick={() => setShowEditModal(true)}
-                  className="absolute top-4 right-4 sm:static sm:self-start text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-white transition-colors"
-                >
-                  Edit
-                </button>
+                {/* Header buttons */}
+                <div className="absolute top-4 right-4 sm:static sm:self-start flex items-center gap-2">
+                  {artist.touring_grid_url ? (
+                    <a
+                      href={artist.touring_grid_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-white transition-colors"
+                    >
+                      Touring Grid
+                    </a>
+                  ) : (
+                    <span
+                      title="No sheet linked yet"
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-700 text-gray-600 cursor-not-allowed"
+                    >
+                      Touring Grid
+                    </span>
+                  )}
+                  {artist.target_list_url ? (
+                    <a
+                      href={artist.target_list_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-white transition-colors"
+                    >
+                      Target List
+                    </a>
+                  ) : (
+                    <span
+                      title="No sheet linked yet"
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-700 text-gray-600 cursor-not-allowed"
+                    >
+                      Target List
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setShowEditModal(true)}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-white transition-colors"
+                  >
+                    Edit
+                  </button>
+                </div>
 
                 {/* Left: name + meta */}
                 <div>

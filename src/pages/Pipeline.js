@@ -688,7 +688,7 @@ export default function Pipeline() {
         <div className="flex items-center gap-2 text-sm text-gray-500">
           <Link to="/" className="hover:text-white transition-colors">Dashboard</Link>
           <span>/</span>
-          <span className="text-gray-300">Pipeline</span>
+          <span className="text-gray-300">Deal Pipeline</span>
         </div>
       </div>
 
@@ -697,7 +697,7 @@ export default function Pipeline() {
         {/* ── HEADER + FILTER ── */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
-            <h2 className="text-2xl font-bold text-white">Pipeline Board</h2>
+            <h2 className="text-2xl font-bold text-white">Deal Pipeline Board</h2>
             <p className="text-gray-500 text-sm mt-1">
               {loading ? 'Loading…' : `${totalDeals} total deals across ${COLUMNS.length} stages`}
             </p>
