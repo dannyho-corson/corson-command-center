@@ -114,6 +114,8 @@ function EditArtistModal({ artist, onClose, onSaved }) {
     label: artist.label || '',
     eu_agent: artist.eu_agent || '',
     notes: artist.notes || '',
+    touring_grid_url: artist.touring_grid_url || '',
+    target_list_url: artist.target_list_url || '',
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
@@ -139,6 +141,8 @@ function EditArtistModal({ artist, onClose, onSaved }) {
       label: form.label || null,
       eu_agent: form.eu_agent || null,
       notes: form.notes || null,
+      touring_grid_url: form.touring_grid_url || null,
+      target_list_url: form.target_list_url || null,
     };
 
     const { data, error } = await supabase.from('artists').update(payload).eq('id', artist.id).select().single();
@@ -253,6 +257,20 @@ function EditArtistModal({ artist, onClose, onSaved }) {
               placeholder="Important notes, radius clauses, context…"
               rows={3}
               className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600 resize-none" />
+          </div>
+          {/* Touring Grid URL */}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Touring Grid URL</label>
+            <input type="text" value={form.touring_grid_url} onChange={e => set('touring_grid_url', e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/..."
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+          </div>
+          {/* Target List URL */}
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Target List URL</label>
+            <input type="text" value={form.target_list_url} onChange={e => set('target_list_url', e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/..."
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
           </div>
           {err && <p className="text-red-400 text-xs">{err}</p>}
           <div className="flex items-center justify-end gap-3 pt-1">
