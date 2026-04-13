@@ -831,7 +831,6 @@ export default function ArtistDetail() {
       const jsonStr = text.replace(/^[^(]*\(/, '').replace(/\);?\s*$/, '');
       const gData = JSON.parse(jsonStr);
       const rows = gData?.table?.rows || [];
-      const cols = gData?.table?.cols || [];
 
       // Find column indices by header text (row 0 or 1 typically has headers)
       // We look for: DATE, CITY, VENUE, PROMOTER, FEE, DEAL TYPE, STATUS, HOLD, NOTES
