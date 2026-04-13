@@ -297,7 +297,7 @@ function Dashboard() {
               <p className="text-gray-500 text-xs mt-0.5">Full roster schedule — all artists, all dates</p>
             </div>
             <a
-              href="https://docs.google.com/spreadsheets/d/1mpL59YlT-utKFNE2ncpHTgUL8uH3hbtCuYmfyqTSwMc/edit?usp=sharing"
+              href="https://docs.google.com/spreadsheets/d/1VqKRFNzfQh_bktqZIah6OgV7djWh85LU/edit?usp=sharing"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg border border-emerald-700 text-emerald-400 hover:bg-emerald-700 hover:text-white transition-colors flex-shrink-0"
