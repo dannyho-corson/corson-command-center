@@ -113,11 +113,27 @@ Templates/                — reusable document templates
 - **Deduplication:** same artist_slug + event_date = skip (shows and pipeline). Same artist_slug + issue = skip (urgent_issues). Activity log always inserts.
 - **Artist validation:** look up `artist_id` from `artists` table by slug before inserting. Skip and warn if not found.
 
+## Architecture — Data Flow
+
+Supabase is the **single source of truth**. Everything flows from it:
+
+```
+Email → Morning briefing → Supabase → App updates live
+                                    → Excel grids (generated output)
+                                    → Google Sheets (generated output)
+```
+
+- Excel files and Google Sheets are **outputs** generated from Supabase.
+- Never edit Excel directly — regenerate with `node scripts/generate-grids.js`.
+- Google Sheets can be edited in a pinch, then synced back via "Sync from Sheet" button on artist detail pages.
+- The `generate-grids.js` script produces the Master Touring Grid and all 27 individual artist Excel files.
+
 ## Running Locally
 
 ```bash
-npm start        # dev server on localhost:3000
-npm run build    # production build (deployed to Vercel)
-npm run seed     # seed artists table
-npm run seed:buyers  # seed buyers table
+npm start                       # dev server on localhost:3000
+npm run build                   # production build (deployed to Vercel)
+npm run seed                    # seed artists table
+npm run seed:buyers             # seed buyers table
+node scripts/generate-grids.js  # regenerate all Excel touring grids from Supabase
 ```

@@ -807,6 +807,149 @@ export default function ArtistDetail() {
   const [showDealModal, setShowDealModal] = useState(false);
   const [editShow, setEditShow] = useState(null);
   const [activityLog, setActivityLog] = useState([]);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState(null);
+
+  // ── SYNC FROM SHEET ──────────────────────────────────────────────────────────
+  async function handleSyncFromSheet() {
+    if (!artist?.touring_grid_url) return;
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      // Extract Google Sheet ID from URL
+      const m = artist.touring_grid_url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if (!m) throw new Error('Invalid Google Sheet URL');
+      const sheetId = m[1];
+
+      // Fetch sheet data as CSV via public export (sheet must be viewable by link)
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
+      const res = await fetch(csvUrl);
+      if (!res.ok) throw new Error(`Sheet fetch failed (${res.status}) — is the sheet shared as "Anyone with link"?`);
+
+      const text = await res.text();
+      // Google wraps the JSON in a callback: google.visualization.Query.setResponse({...})
+      const jsonStr = text.replace(/^[^(]*\(/, '').replace(/\);?\s*$/, '');
+      const gData = JSON.parse(jsonStr);
+      const rows = gData?.table?.rows || [];
+      const cols = gData?.table?.cols || [];
+
+      // Find column indices by header text (row 0 or 1 typically has headers)
+      // We look for: DATE, CITY, VENUE, PROMOTER, FEE, DEAL TYPE, STATUS, HOLD, NOTES
+      let headerRow = -1;
+      for (let i = 0; i < Math.min(rows.length, 5); i++) {
+        const vals = (rows[i]?.c || []).map(c => (c?.v || '').toString().toUpperCase());
+        if (vals.some(v => v.includes('DATE')) && vals.some(v => v.includes('CITY') || v.includes('VENUE'))) {
+          headerRow = i;
+          break;
+        }
+      }
+      if (headerRow === -1) throw new Error('Could not find header row in sheet (looking for DATE + CITY/VENUE columns)');
+
+      const headers = (rows[headerRow]?.c || []).map(c => (c?.v || '').toString().toUpperCase().trim());
+      const idx = (name) => headers.findIndex(h => h.includes(name));
+      const ci = {
+        date: idx('DATE'), city: idx('CITY'), venue: idx('VENUE'),
+        promoter: idx('PROMOTER'), fee: idx('FEE'), dealType: idx('DEAL TYPE') !== -1 ? idx('DEAL TYPE') : idx('DEAL'),
+        status: idx('STATUS'), hold: idx('HOLD'), notes: idx('NOTES'),
+      };
+
+      // Parse data rows
+      const showRows = [];
+      for (let i = headerRow + 1; i < rows.length; i++) {
+        const cells = rows[i]?.c || [];
+        const getVal = (colIdx) => {
+          if (colIdx < 0 || !cells[colIdx]) return null;
+          const c = cells[colIdx];
+          // Google Sheets dates come as "Date(yyyy,m,d)"
+          if (c.v && typeof c.v === 'string' && c.v.startsWith('Date(')) {
+            const dm = c.v.match(/Date\((\d+),(\d+),(\d+)\)/);
+            if (dm) {
+              const y = dm[1], mo = String(Number(dm[2]) + 1).padStart(2, '0'), dd = dm[3].padStart(2, '0');
+              return `${y}-${mo}-${dd}`;
+            }
+          }
+          return c.f || c.v || null;
+        };
+
+        const dateVal = getVal(ci.date);
+        const city = getVal(ci.city);
+        const venue = getVal(ci.venue);
+        if (!city && !venue) continue; // skip empty rows
+
+        // Parse date to ISO
+        let eventDate = null;
+        if (dateVal) {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+            eventDate = dateVal;
+          } else {
+            const d = new Date(dateVal);
+            if (!isNaN(d.getTime())) eventDate = d.toISOString().split('T')[0];
+          }
+        }
+        if (!eventDate) continue; // skip if no valid date
+
+        showRows.push({
+          artist_slug: slug,
+          artist_id: artist.id,
+          event_date: eventDate,
+          city: city || null,
+          venue: venue || null,
+          promoter: getVal(ci.promoter) || null,
+          fee: getVal(ci.fee) || null,
+          deal_type: getVal(ci.dealType) || null,
+          status: getVal(ci.status) || 'Confirmed',
+          hold_number: getVal(ci.hold) || null,
+          notes: getVal(ci.notes) || null,
+        });
+      }
+
+      if (showRows.length === 0) {
+        setSyncMsg({ ok: false, text: 'No show data found in sheet.' });
+        setSyncing(false);
+        return;
+      }
+
+      // Upsert: for each row, check if artist_slug+event_date exists
+      let inserted = 0, updated = 0, skipped = 0;
+      for (const row of showRows) {
+        const { data: existing } = await supabase
+          .from('shows')
+          .select('id')
+          .eq('artist_slug', row.artist_slug)
+          .eq('event_date', row.event_date)
+          .limit(1);
+
+        if (existing && existing.length > 0) {
+          // Update existing — sheet data wins
+          const { error } = await supabase
+            .from('shows')
+            .update({
+              city: row.city, venue: row.venue, promoter: row.promoter,
+              fee: row.fee, deal_type: row.deal_type, status: row.status,
+              hold_number: row.hold_number, notes: row.notes,
+            })
+            .eq('id', existing[0].id);
+          if (error) { skipped++; } else { updated++; }
+        } else {
+          const { error } = await supabase.from('shows').insert(row);
+          if (error) { skipped++; } else { inserted++; }
+        }
+      }
+
+      // Refresh shows list
+      const { data: refreshed } = await supabase
+        .from('shows').select('*').eq('artist_slug', slug).order('event_date');
+      if (refreshed) setShows(refreshed);
+
+      await logActivity(slug, 'sheet_synced', `Synced ${showRows.length} rows from Google Sheet (${inserted} new, ${updated} updated, ${skipped} skipped)`);
+      setSyncMsg({ ok: true, text: `Synced! ${inserted} new, ${updated} updated${skipped ? `, ${skipped} skipped` : ''}` });
+    } catch (err) {
+      setSyncMsg({ ok: false, text: err.message });
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(null), 6000);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -872,6 +1015,17 @@ export default function ArtistDetail() {
           </div>
         )}
 
+        {/* Sync toast */}
+        {syncMsg && (
+          <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg text-sm font-semibold shadow-lg border ${
+            syncMsg.ok
+              ? 'bg-emerald-900/90 border-emerald-700 text-emerald-300'
+              : 'bg-red-900/90 border-red-700 text-red-300'
+          }`}>
+            {syncMsg.ok ? '✓ ' : '✕ '}{syncMsg.text}
+          </div>
+        )}
+
         {loading && <Skeleton />}
 
         {!loading && artist && (
@@ -883,14 +1037,28 @@ export default function ArtistDetail() {
                 {/* Header buttons */}
                 <div className="absolute top-4 right-4 sm:static sm:self-start flex items-center gap-2">
                   {artist.touring_grid_url ? (
-                    <a
-                      href={artist.touring_grid_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-white transition-colors"
-                    >
-                      Touring Grid
-                    </a>
+                    <>
+                      <a
+                        href={artist.touring_grid_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-white transition-colors"
+                      >
+                        Touring Grid
+                      </a>
+                      <button
+                        onClick={handleSyncFromSheet}
+                        disabled={syncing}
+                        className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
+                          syncing
+                            ? 'border-gray-700 text-gray-600 cursor-wait'
+                            : 'border-indigo-600 text-indigo-400 hover:border-indigo-400 hover:text-indigo-300'
+                        }`}
+                        title="Pull show data from Google Sheet into Supabase"
+                      >
+                        {syncing ? 'Syncing...' : 'Sync from Sheet'}
+                      </button>
+                    </>
                   ) : (
                     <span
                       title="No sheet linked yet"

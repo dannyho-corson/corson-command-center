@@ -24,5 +24,7 @@ yarn-error.log*
 
 # Email sync — secrets and runtime files
 scripts/.env
+scripts/.env*
+scripts/.en*
 scripts/.processed-emails.json
 scripts/sync-log.txt
