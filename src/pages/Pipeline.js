@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLog';
 import Nav from '../components/Nav';
 import ConfirmationEmailModal from '../components/ConfirmationEmailModal';
+import OfferForwardEmailModal from '../components/OfferForwardEmailModal';
 
 // ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
 const PIPELINE_STAGES = ['Offer In', 'Negotiating'];
@@ -369,8 +370,10 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
   const [err, setErr] = useState(null);
   const [showReminder, setShowReminder] = useState(false);
   const [showConfirmEmail, setShowConfirmEmail] = useState(false);
+  const [showForwardEmail, setShowForwardEmail] = useState(false);
 
   const isConfirmedOrLater = SHOW_STAGES.includes(form.stage);
+  const isOfferIn = form.stage === 'Offer In';
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); setSaved(false); }
 
@@ -484,6 +487,12 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
               ✉ Draft Confirmation Email
             </button>
           )}
+          {isOfferIn && (
+            <button onClick={() => setShowForwardEmail(true)}
+              className="w-full text-emerald-300 text-sm font-semibold px-4 py-2 rounded-lg border border-emerald-700 bg-emerald-900/20 hover:bg-emerald-900/40 transition-colors">
+              ✉ Draft Forward Email
+            </button>
+          )}
           <div className="flex items-center justify-between gap-3">
             <button onClick={() => setShowReminder(true)}
               className="text-indigo-400 text-sm font-semibold px-4 py-2 rounded-lg border border-indigo-700 hover:bg-indigo-900/30 transition-colors">
@@ -517,6 +526,15 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
           deal={deal}
           artistDisplayName={artistName}
           onClose={() => setShowConfirmEmail(false)}
+        />
+      )}
+
+      {/* Offer forward email modal */}
+      {showForwardEmail && (
+        <OfferForwardEmailModal
+          deal={deal}
+          artistDisplayName={artistName}
+          onClose={() => setShowForwardEmail(false)}
         />
       )}
 
