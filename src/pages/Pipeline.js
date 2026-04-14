@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLog';
 import Nav from '../components/Nav';
+import ConfirmationEmailModal from '../components/ConfirmationEmailModal';
 
 // ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
 const PIPELINE_STAGES = ['Offer In', 'Negotiating'];
@@ -367,6 +368,9 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState(null);
   const [showReminder, setShowReminder] = useState(false);
+  const [showConfirmEmail, setShowConfirmEmail] = useState(false);
+
+  const isConfirmedOrLater = SHOW_STAGES.includes(form.stage);
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); setSaved(false); }
 
@@ -473,18 +477,26 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
         </div>
 
         {/* Footer actions */}
-        <div className="px-6 py-4 border-t border-gray-800 flex items-center justify-between gap-3">
-          <button onClick={() => setShowReminder(true)}
-            className="text-indigo-400 text-sm font-semibold px-4 py-2 rounded-lg border border-indigo-700 hover:bg-indigo-900/30 transition-colors">
-            Set Reminder
-          </button>
-          <div className="flex items-center gap-2">
-            {saved && <span className="text-emerald-400 text-xs">Saved</span>}
-            <button onClick={handleSave} disabled={saving}
-              className="text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-60 transition-colors"
-              style={{ backgroundColor: '#6366F1' }}>
-              {saving ? 'Saving…' : 'Save Changes'}
+        <div className="px-6 py-4 border-t border-gray-800 flex flex-col gap-2">
+          {isConfirmedOrLater && (
+            <button onClick={() => setShowConfirmEmail(true)}
+              className="w-full text-emerald-300 text-sm font-semibold px-4 py-2 rounded-lg border border-emerald-700 bg-emerald-900/20 hover:bg-emerald-900/40 transition-colors">
+              ✉ Draft Confirmation Email
             </button>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <button onClick={() => setShowReminder(true)}
+              className="text-indigo-400 text-sm font-semibold px-4 py-2 rounded-lg border border-indigo-700 hover:bg-indigo-900/30 transition-colors">
+              Set Reminder
+            </button>
+            <div className="flex items-center gap-2">
+              {saved && <span className="text-emerald-400 text-xs">Saved</span>}
+              <button onClick={handleSave} disabled={saving}
+                className="text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-60 transition-colors"
+                style={{ backgroundColor: '#6366F1' }}>
+                {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -496,6 +508,15 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
           artistName={artistName}
           onClose={() => setShowReminder(false)}
           onSaved={() => setShowReminder(false)}
+        />
+      )}
+
+      {/* Confirmation email modal */}
+      {showConfirmEmail && (
+        <ConfirmationEmailModal
+          deal={deal}
+          artistDisplayName={artistName}
+          onClose={() => setShowConfirmEmail(false)}
         />
       )}
 
