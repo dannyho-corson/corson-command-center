@@ -177,18 +177,20 @@ function Dashboard() {
         const rosterCount = artists.filter((a) => a.category !== 'priority').length;
         const activeDeals = shows.length + deals.length;
 
-        // Commission: sum confirmed show fees × 10% artist commission × 60% Danny's cut
-        const confirmedFeeTotal = shows.reduce((sum, s) => {
+        // Commission: sum fees from Confirmed/Contracted/Advancing shows × 15%
+        const COMMISSIONABLE_STATUSES = new Set(['Confirmed', 'Contracted', 'Advancing', 'Active', 'Advanced']);
+        const commissionableFees = shows.reduce((sum, s) => {
+          if (!COMMISSIONABLE_STATUSES.has(s.status)) return sum;
           const n = parseFloat((s.fee || '').replace(/[^0-9.]/g, ''));
           return sum + (isNaN(n) ? 0 : n);
         }, 0);
-        const commission = Math.round(confirmedFeeTotal * 0.10 * 0.60);
+        const commission = Math.round(commissionableFees * 0.15);
 
         setKpis([
           { label: 'Roster Artists', value: String(totalArtists), sub: `${priorityCount} priority · ${rosterCount} full roster`, icon: '🎧', color: 'indigo' },
           { label: 'Active Deals', value: String(activeDeals), sub: 'Across all pipeline stages', icon: '📋', color: 'blue' },
           { label: 'Urgent Issues', value: String(urgentIssues.length), sub: 'Require action today', icon: '🚨', color: 'red' },
-          { label: '2026 Commission', value: commission > 0 ? `$${commission.toLocaleString()}` : '$25,295', sub: "Danny's 60% share YTD", icon: '💰', color: 'green' },
+          { label: 'YTD Commission', value: `$${commission.toLocaleString()}`, sub: `15% of $${commissionableFees.toLocaleString()} confirmed`, icon: '💰', color: 'green' },
         ]);
 
         // ── PIPELINE SNAPSHOT ─────────────────────────────────────────────────

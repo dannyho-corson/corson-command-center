@@ -556,6 +556,29 @@ function DealCard({ deal, col, artistNames, onCardClick }) {
   const fee = deal.fee_offered || deal.fee || '—';
   const buyer = deal.buyer_company || deal.buyer || deal.promoter || '—';
 
+  const isShow = !deal.stage; // pipeline deals have stage, shows have deal_type
+  const tableName = isShow ? 'shows' : 'pipeline';
+
+  // Local state for quick notes so typing is snappy; persist on blur
+  const [notes, setNotes] = useState(deal.notes || '');
+  const [saveStatus, setSaveStatus] = useState(null); // 'saving' | 'saved' | 'error'
+
+  // If parent updates deal.notes (e.g. after detail panel save), sync local state
+  useEffect(() => { setNotes(deal.notes || ''); }, [deal.notes, deal.id]);
+
+  async function persistNotes() {
+    if ((notes || '') === (deal.notes || '')) return; // nothing changed
+    setSaveStatus('saving');
+    const { error } = await supabase.from(tableName).update({ notes: notes || null }).eq('id', deal.id);
+    if (error) {
+      setSaveStatus('error');
+    } else {
+      deal.notes = notes; // keep local card in sync without re-fetching
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus(null), 1500);
+    }
+  }
+
   return (
     <div
       onClick={() => onCardClick(deal)}
@@ -604,8 +627,29 @@ function DealCard({ deal, col, artistNames, onCardClick }) {
         </div>
       )}
 
+      {/* Quick Notes — saves on blur, stops click-to-open */}
+      <div
+        className="mt-3 pt-3 border-t border-gray-800"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-gray-600 text-[10px] uppercase tracking-wider font-semibold">Quick Notes</span>
+          {saveStatus === 'saving' && <span className="text-gray-500 text-[10px]">saving…</span>}
+          {saveStatus === 'saved' && <span className="text-emerald-400 text-[10px]">✓ saved</span>}
+          {saveStatus === 'error' && <span className="text-red-400 text-[10px]">save failed</span>}
+        </div>
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          onBlur={persistNotes}
+          placeholder="Jot a quick thought…"
+          rows={2}
+          className="w-full bg-gray-950 border border-gray-800 hover:border-gray-700 focus:border-indigo-600 text-gray-300 text-xs rounded-md px-2 py-1.5 resize-none focus:outline-none placeholder-gray-700"
+        />
+      </div>
+
       {/* Click hint */}
-      <div className="mt-2 text-gray-700 text-xs">Click to edit →</div>
+      <div className="mt-2 text-gray-700 text-xs">Click elsewhere to edit →</div>
     </div>
   );
 }

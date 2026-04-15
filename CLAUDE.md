@@ -43,10 +43,10 @@ Stages 1-4 live in the `pipeline` table. Stages 5-8 live in the `shows` table (a
 shogun, junkie-kid, clawz, drakk, hellbound, triptykh, morelia, ketting, mad-dog, anime, dr-greco
 
 **Full roster:**
-anoluxx, water-spirit, dea-magna, jenna-shaw, jay-toledo, naomi-luna, gioh-cecato, pixie-dust, death-code, taylor-torrence, sihk, lara-klart, cyboy, mandy
+anoluxx, water-spirit, dea-magna, jenna-shaw, jay-toledo, naomi-luna, gioh-cecato, pixie-dust, death-code, taylor-torrence, sihk, lara-klart, cyboy, mandy, fernanda-martins, jayr
 
 **Leo's artists:**
-tnt, dual-damage, the-purge, casska
+tnt, dual-damage, the-purge, casska, sub-zero-project, melody-man, frontliner
 
 Artist slugs are lowercase-hyphenated and used as foreign keys across all tables (`artist_slug`).
 
@@ -112,6 +112,16 @@ Templates/                — reusable document templates
 - **Fee values** are stored as-is from emails: `$2,500`, `$1,800+HGR`, `€3,000 ATA`. Never strip currency symbols or normalize.
 - **Deduplication:** same artist_slug + event_date = skip (shows and pipeline). Same artist_slug + issue = skip (urgent_issues). Activity log always inserts.
 - **Artist validation:** look up `artist_id` from `artists` table by slug before inserting. Skip and warn if not found.
+
+## What's Built
+
+- **Dashboard** (`src/App.js`) — KPI cards. YTD commission calculated as 15% of confirmed/contracted/advancing show fees (no placeholder fallback).
+- **Pipeline kanban** (`src/pages/Pipeline.js`) — drag-through stages, inline **Quick Notes** textarea on every deal card (auto-saves to `notes` column on blur), detail panel with stage selector.
+- **Stage 04 Offer Forward Email drafter** (`src/components/OfferForwardEmailModal.js`) — triggers on stage=`Offer In` in the detail panel. Pre-fills email to `artist.manager_email` with a "My Notes" field for Danny's opinion (appended before signature).
+- **Stage 06 Confirmation Email drafter** (`src/components/ConfirmationEmailModal.js`) — triggers on Confirmed/Contracted/Advanced/Settled. Pre-fills Corson-standard confirmation: `CONFIRMED: Artist (MM-DD-YYYY) City, State [Venue]` + CC management + BCC bookings@.
+- **Artist Detail** (`src/pages/ArtistDetail.js`) — per-artist dashboard with shows, pipeline, activity log, Touring Grid link + Sync-from-Sheet button.
+- **Morning briefing** — `~/.claude/scheduled-tasks/corson-daily-briefing/SKILL.md`; runs Mon-Fri 10:06 AM; inbox scan + 7-day stale-Negotiating follow-up flagging as `urgent_issues`.
+- **Grid generator** — `node scripts/generate-grids.js` rebuilds Master Touring Grid + 28 individual Excel files from Supabase.
 
 ## Architecture — Data Flow
 
