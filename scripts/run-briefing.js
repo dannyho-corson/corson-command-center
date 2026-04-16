@@ -81,16 +81,23 @@ function runChromeJS(jsSource) {
   const applescript = `
     set jsSource to read POSIX file "${tmpJS}" as «class utf8»
     tell application "Google Chrome"
-      set found to missing value
+      set mailTab to missing value
+      set outlookTab to missing value
+      -- Prefer a tab on the mail/inbox path; fall back to any outlook tab
       repeat with w in windows
         repeat with t in tabs of w
-          if URL of t contains "outlook" then
-            set found to t
+          set u to URL of t
+          if u contains "outlook" and u contains "/mail" then
+            set mailTab to t
             exit repeat
+          else if u contains "outlook" and outlookTab is missing value then
+            set outlookTab to t
           end if
         end repeat
-        if found is not missing value then exit repeat
+        if mailTab is not missing value then exit repeat
       end repeat
+      set found to mailTab
+      if found is missing value then set found to outlookTab
       if found is missing value then
         return "{\\"ok\\":false,\\"error\\":\\"No Outlook tab open in Chrome\\"}"
       end if
@@ -114,96 +121,52 @@ function runChromeJS(jsSource) {
 
 // ─── outlook scraping ─────────────────────────────────────────────────────
 function scrapeOutlook() {
-  // Phase 1: kick off extraction. The injected JS populates window._corson asynchronously.
-  const kickoff = runChromeJS(`
-    window._corson = { done: false, emails: [], error: null, progress: 'starting' };
+  // Single-call synchronous extraction. Outlook's row aria-label contains
+  // sender + subject + time + preview — enough for keyword classification
+  // without having to click through each email (fragile UI automation).
+  const result = runChromeJS(`
+    var rows = Array.from(document.querySelectorAll('[role="option"][aria-label]'));
+    // Filter out folder-tree rows
+    rows = rows.filter(function(r){
+      var a = r.getAttribute('aria-label') || '';
+      return a.length > 30 && !r.closest('[role="tree"]');
+    });
+    // Today's emails: Outlook shows "H:MM AM/PM" for today, dates otherwise
+    var todayRows = rows.filter(function(r){
+      return /\\b\\d{1,2}:\\d{2}\\s?(AM|PM)\\b/i.test(r.getAttribute('aria-label') || '');
+    });
 
-    (async function(){
-      try {
-        // Find inbox list items. Outlook uses role="option" for mail rows.
-        var rows = Array.from(document.querySelectorAll('[role="option"][aria-label]'));
-        // Filter out non-mail rows (folders, etc.) — mail rows have "from" in aria-label.
-        rows = rows.filter(function(r){
-          var a = r.getAttribute('aria-label') || '';
-          return a.length > 20 && !r.closest('[role="tree"]');
-        });
-
-        // Filter to today's emails by looking for time-only markers ("h:mm AM/PM")
-        // Outlook shows time for today, date for older messages.
-        var todayRows = rows.filter(function(r){
-          var label = r.getAttribute('aria-label') || '';
-          // Matches "3:14 PM" or "11:52 AM" — indicates today
-          return /\\b\\d{1,2}:\\d{2}\\s?(AM|PM)\\b/i.test(label);
-        });
-
-        window._corson.progress = 'found ' + todayRows.length + ' of ' + rows.length + ' rows are from today';
-
-        for (var i = 0; i < todayRows.length; i++) {
-          var row = todayRows[i];
-          row.scrollIntoView({ block: 'center' });
-          row.click();
-          // Wait for reading pane to update
-          await new Promise(function(res){ setTimeout(res, 900); });
-
-          var ariaLabel = row.getAttribute('aria-label') || '';
-
-          // Reading pane body — try several selectors, Outlook web changes these
-          var bodyEl =
-            document.querySelector('[aria-label="Message body"]') ||
-            document.querySelector('[role="document"]') ||
-            document.querySelector('.wide-content-host') ||
-            document.querySelector('[data-testid="message-body"]');
-          var bodyText = bodyEl ? (bodyEl.innerText || bodyEl.textContent || '') : '';
-
-          // Subject from reading pane header
-          var subjEl =
-            document.querySelector('[data-testid="subject"]') ||
-            document.querySelector('h1[role="heading"]') ||
-            document.querySelector('[aria-label^="Subject"]');
-          var subject = subjEl ? (subjEl.innerText || subjEl.textContent || '').trim() : '';
-
-          // Sender
-          var fromEl =
-            document.querySelector('[data-testid="message-header-from"]') ||
-            document.querySelector('[aria-label^="From"]');
-          var from = fromEl ? (fromEl.innerText || fromEl.textContent || '').trim() : '';
-
-          window._corson.emails.push({
-            ariaLabel: ariaLabel,
-            subject: subject,
-            from: from,
-            body: bodyText.slice(0, 8000) // cap per email
-          });
-          window._corson.progress = 'scraped ' + (i + 1) + '/' + todayRows.length;
-        }
-        window._corson.done = true;
-      } catch (e) {
-        window._corson.error = String(e && e.message || e);
-        window._corson.done = true;
+    var emails = todayRows.map(function(r){
+      var label = r.getAttribute('aria-label') || '';
+      // Strip leading state flags: "Collapsed", "Has attachments", "Replied", "Forwarded"
+      var cleaned = label.replace(/^(Collapsed|Expanded|Has attachments|Replied|Forwarded|Flagged|Unread|Read)\\s+/gi, '')
+                         .replace(/^(Collapsed|Expanded|Has attachments|Replied|Forwarded|Flagged|Unread|Read)\\s+/gi, '')
+                         .replace(/^(Collapsed|Expanded|Has attachments|Replied|Forwarded|Flagged|Unread|Read)\\s+/gi, '');
+      // Split at the time marker: before = sender+subject, after = preview
+      var timeMatch = cleaned.match(/\\s(\\d{1,2}:\\d{2}\\s?(?:AM|PM))\\s/i);
+      var head = cleaned, time = '', preview = '';
+      if (timeMatch) {
+        head = cleaned.slice(0, timeMatch.index).trim();
+        time = timeMatch[1];
+        preview = cleaned.slice(timeMatch.index + timeMatch[0].length).trim();
       }
-    })();
+      // Head usually looks like "Sender Name Subject Line" — naive split at first ALL-CAPS or known sep
+      // Just use the whole head as context.
+      return {
+        ariaLabel: label,
+        subject: head,
+        from: head.split(/;|,/)[0].trim(),
+        time: time,
+        body: preview, // preview text — classification input
+        date: new Date().toISOString().slice(0, 10)
+      };
+    });
 
-    return 'started';
+    return emails;
   `);
 
-  if (!kickoff.ok) throw new Error(kickoff.error);
-
-  // Phase 2: poll until done or timeout
-  const pollDeadline = Date.now() + 6 * 60 * 1000; // 6-min soft ceiling for scrape
-  while (Date.now() < pollDeadline) {
-    if (Date.now() - START > TIMEOUT_MS - 30_000) throw new Error('Approaching global timeout — aborting scrape');
-    const poll = runChromeJS(`return JSON.stringify(window._corson || { done: false, progress: 'no state' });`);
-    if (!poll.ok) throw new Error(poll.error);
-    const state = JSON.parse(poll.value);
-    log(`scrape progress: ${state.progress}`);
-    if (state.done) {
-      if (state.error) throw new Error(`Chrome scrape error: ${state.error}`);
-      return state.emails || [];
-    }
-    // Sleep 1.5s between polls
-    execFileSync('sleep', ['1.5']);
-  }
-  throw new Error('Scrape polling timed out');
+  if (!result.ok) throw new Error(result.error);
+  return result.value || [];
 }
 
 // ─── classification ───────────────────────────────────────────────────────
@@ -261,15 +224,34 @@ function detectStage(text) {
   return 'Inquiry';
 }
 
+const MONTH_NAMES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12,
+  january:1,february:2,march:3,april:4,june:6,july:7,august:8,september:9,october:10,november:11,december:12 };
+
 function extractDate(text) {
-  // ISO first
-  const iso = text.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
-  if (iso) return iso[0];
+  // ISO
+  let m = text.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if (m) return m[0];
   // MM/DD/YYYY or MM-DD-YYYY
-  const us = text.match(/\b(\d{1,2})[-/](\d{1,2})[-/](20\d{2})\b/);
-  if (us) {
-    const [, m, d, y] = us;
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  m = text.match(/\b(\d{1,2})[-/](\d{1,2})[-/](20\d{2})\b/);
+  if (m) return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+  // MM.DD.YY or M.D.YY (two-digit year → 20YY)
+  m = text.match(/\b(\d{1,2})[./](\d{1,2})[./](\d{2})\b/);
+  if (m) return `20${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+  // Month-name formats: "April 25", "April 25 2026", "Apr 25", "25 April", "25 Apr 2026"
+  const mName = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*';
+  let re = new RegExp(`\\b(${mName})\\s+(\\d{1,2})(?:\\s*,?\\s*(20\\d{2}))?\\b`, 'i');
+  m = text.match(re);
+  if (m) {
+    const mon = MONTH_NAMES[m[1].toLowerCase().slice(0, 4)] || MONTH_NAMES[m[1].toLowerCase().slice(0, 3)];
+    const yr = m[3] || new Date().getFullYear();
+    if (mon) return `${yr}-${String(mon).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`;
+  }
+  re = new RegExp(`\\b(\\d{1,2})\\s+(${mName})(?:\\s+(20\\d{2}))?\\b`, 'i');
+  m = text.match(re);
+  if (m) {
+    const mon = MONTH_NAMES[m[2].toLowerCase().slice(0, 4)] || MONTH_NAMES[m[2].toLowerCase().slice(0, 3)];
+    const yr = m[3] || new Date().getFullYear();
+    if (mon) return `${yr}-${String(mon).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
   }
   return null;
 }
@@ -294,49 +276,37 @@ function classifyEmail(email) {
   const fee = extractFee(hay);
   const { venue, city } = extractCityVenue(hay);
 
-  const classifications = [];
+  // Short, clean subject snippet for notes/issue
+  const snippet = (email.subject || '').replace(/\s+/g, ' ').slice(0, 160);
 
-  if (SHOW_TRIGGERS.test(hay)) {
+  const classifications = [];
+  const isShow = SHOW_TRIGGERS.test(hay);
+  const isPipeline = PIPELINE_TRIGGERS.test(hay) && !isShow;
+  const isUrgent = URGENT_TRIGGERS.test(hay);
+
+  if (isShow) {
     classifications.push({
       kind: 'show',
-      row: {
-        artist_slug,
-        event_date,
-        city,
-        venue,
-        promoter: email.from?.split('<')[0]?.trim() || null,
-        fee,
-        deal_type: 'Confirmed',
-      },
+      row: { artist_slug, event_date, city, venue, promoter: null, fee, deal_type: 'Confirmed' },
     });
   }
-
-  if (PIPELINE_TRIGGERS.test(hay) && !SHOW_TRIGGERS.test(hay)) {
+  if (isPipeline) {
     classifications.push({
       kind: 'pipeline',
       row: {
         artist_slug,
         stage: detectStage(hay),
-        event_date,
-        market: city,
-        venue,
-        buyer: email.from?.split('<')[0]?.trim() || null,
-        buyer_company: null,
+        event_date, market: city, venue,
+        buyer: null, buyer_company: null,
         fee_offered: fee,
-        notes: `Auto-extracted ${new Date().toISOString().slice(0, 10)}: ${email.subject || ''}`.slice(0, 500),
+        notes: `Auto-extracted ${new Date().toISOString().slice(0, 10)}: ${snippet}`.slice(0, 500),
       },
     });
   }
-
-  if (URGENT_TRIGGERS.test(hay)) {
+  if (isUrgent) {
     classifications.push({
       kind: 'urgent',
-      row: {
-        artist_slug,
-        issue: (email.subject || email.ariaLabel || '').slice(0, 200),
-        priority: 'High',
-        resolved: false,
-      },
+      row: { artist_slug, issue: snippet || 'urgent email flagged', priority: 'High', resolved: false },
     });
   }
 
@@ -344,11 +314,7 @@ function classifyEmail(email) {
   if (classifications.length > 0 && artist_slug) {
     classifications.push({
       kind: 'activity',
-      row: {
-        artist_slug,
-        action: 'email_processed',
-        description: `${email.subject || '(no subject)'} — from ${email.from || 'unknown'}`.slice(0, 500),
-      },
+      row: { artist_slug, action: 'email_processed', description: snippet.slice(0, 500) },
     });
   }
 
@@ -496,6 +462,10 @@ function finalize(extra = {}) {
         }
 
         if (kind === 'show') {
+          if (!row.event_date) {
+            skipped.push(`show no-date: ${row.artist_slug} — ${email.subject?.slice(0, 60)}`);
+            counts.skipped++; continue;
+          }
           if (await existsShow(supabase, row.artist_slug, row.event_date)) {
             skipped.push(`show dup: ${row.artist_slug} ${row.event_date}`);
             counts.skipped++; continue;
@@ -504,6 +474,10 @@ function finalize(extra = {}) {
           if (error) { recordError(`show insert ${row.artist_slug}`, error); continue; }
           inserted.shows.push(data); counts.shows++;
         } else if (kind === 'pipeline') {
+          if (!row.event_date) {
+            skipped.push(`pipeline no-date: ${row.artist_slug} — ${email.subject?.slice(0, 60)}`);
+            counts.skipped++; continue;
+          }
           if (await existsPipeline(supabase, row.artist_slug, row.event_date, row.stage)) {
             skipped.push(`pipeline dup: ${row.artist_slug} ${row.event_date} ${row.stage}`);
             counts.skipped++; continue;
