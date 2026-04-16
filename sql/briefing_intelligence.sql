@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS industry_intel (
   updated_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- If a prior partial migration created industry_intel without these columns,
+-- add them now. All statements are IF NOT EXISTS so safe to re-run.
+ALTER TABLE industry_intel ADD COLUMN IF NOT EXISTS market         TEXT;
+ALTER TABLE industry_intel ADD COLUMN IF NOT EXISTS corson_status  TEXT;
+ALTER TABLE industry_intel ADD COLUMN IF NOT EXISTS priority       TEXT;
+ALTER TABLE industry_intel ADD COLUMN IF NOT EXISTS corson_artists TEXT[];
+ALTER TABLE industry_intel ADD COLUMN IF NOT EXISTS contacts       JSONB;
+ALTER TABLE industry_intel ADD COLUMN IF NOT EXISTS event_date     TEXT;
+
 CREATE INDEX IF NOT EXISTS industry_intel_category_idx ON industry_intel (category);
 CREATE INDEX IF NOT EXISTS industry_intel_priority_idx ON industry_intel (priority);
 
