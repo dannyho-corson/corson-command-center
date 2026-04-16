@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import './App.css';
 import ArtistList from './pages/ArtistList';
@@ -33,43 +33,6 @@ function loadResolvedFromLS() {
 
 function saveResolvedToLS(set) {
   localStorage.setItem(LS_KEY, JSON.stringify([...set]));
-}
-
-// ── HELPERS ───────────────────────────────────────────────────────────────────
-function stageColor(stage) {
-  if (['Contracted', 'Confirmed', 'Advanced', 'Settled'].includes(stage)) return 'green';
-  if (['Negotiating', 'Offer In', 'Request'].includes(stage)) return 'yellow';
-  return 'gray';
-}
-
-// Format ISO date for display
-function fmtDate(row) {
-  if (row.notes && /^[A-Z][a-z]/.test(row.notes)) {
-    const display = row.notes.split(' — ')[0];
-    if (display) return display;
-  }
-  if (!row.event_date) return '—';
-  const d = new Date(row.event_date + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-// ── STAGE BADGE ───────────────────────────────────────────────────────────────
-function StageBadge({ stage, color }) {
-  const classes = {
-    green: 'bg-emerald-900 text-emerald-300 border border-emerald-700',
-    yellow: 'bg-yellow-900 text-yellow-300 border border-yellow-700',
-    red: 'bg-red-900 text-red-300 border border-red-700',
-    gray: 'bg-gray-800 text-gray-400 border border-gray-700',
-  };
-  return (
-    <span
-      className={`px-2 py-0.5 rounded text-xs font-semibold ${
-        classes[color] || classes.gray
-      }`}
-    >
-      {stage}
-    </span>
-  );
 }
 
 // ── SEVERITY BADGE ────────────────────────────────────────────────────────────
@@ -120,9 +83,291 @@ function KpiCard({ kpi }) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
+// ── AVAILABILITY WIDGET ──────────────────────────────────────────────────────
+// Given all roster artists + all shows, return three buckets for a chosen date.
+// CONFIRMED/ADVANCING = show on that date with deal_type Confirmed/Contracted/Advanced/Settled
+// HOLD/PENDING       = pipeline entry on that date, or show with deal_type Hold/Pending
+// AVAILABLE          = everyone else
+function bucketArtistsForDate(artists, shows, pipeline, dateStr) {
+  const confirmedStatuses = new Set(['Confirmed', 'Contracted', 'Advanced', 'Settled', 'Advancing']);
+  const holdStatuses = new Set(['Hold', 'Pending']);
+
+  const confirmedBy = new Map(); // slug -> [show, ...]
+  const holdBy = new Map();
+
+  for (const s of shows) {
+    if (s.event_date !== dateStr) continue;
+    if (confirmedStatuses.has(s.deal_type)) {
+      if (!confirmedBy.has(s.artist_slug)) confirmedBy.set(s.artist_slug, []);
+      confirmedBy.get(s.artist_slug).push(s);
+    } else if (holdStatuses.has(s.deal_type)) {
+      if (!holdBy.has(s.artist_slug)) holdBy.set(s.artist_slug, []);
+      holdBy.get(s.artist_slug).push(s);
+    }
+  }
+  for (const p of pipeline) {
+    if (p.event_date !== dateStr) continue;
+    if (confirmedBy.has(p.artist_slug)) continue; // confirmed trumps hold
+    if (!holdBy.has(p.artist_slug)) holdBy.set(p.artist_slug, []);
+    holdBy.get(p.artist_slug).push({ venue: p.venue, city: p.market, promoter: p.buyer_company || p.buyer, stage: p.stage });
+  }
+
+  const confirmed = [];
+  const hold = [];
+  const available = [];
+
+  for (const a of artists) {
+    if (confirmedBy.has(a.slug)) {
+      confirmed.push({ artist: a, entries: confirmedBy.get(a.slug) });
+    } else if (holdBy.has(a.slug)) {
+      hold.push({ artist: a, entries: holdBy.get(a.slug) });
+    } else {
+      available.push({ artist: a });
+    }
+  }
+
+  return { confirmed, hold, available };
+}
+
+// Find next N open Fri/Sat weekends (no show) for an artist slug.
+function findOpenWeekends(slug, shows, pipeline, count = 10) {
+  const blocked = new Set();
+  for (const s of shows) if (s.artist_slug === slug && s.event_date) blocked.add(s.event_date);
+  for (const p of pipeline) if (p.artist_slug === slug && p.event_date) blocked.add(p.event_date);
+
+  const results = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const cursor = new Date(today);
+  // advance to next Friday
+  while (cursor.getDay() !== 5) cursor.setDate(cursor.getDate() + 1);
+
+  const fmtISO = d => d.toISOString().split('T')[0];
+  const fmtDisplay = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  // Iterate up to 2 years out to be safe
+  for (let i = 0; i < 104 && results.length < count; i++) {
+    const fri = new Date(cursor);
+    const sat = new Date(cursor);
+    sat.setDate(sat.getDate() + 1);
+    const friISO = fmtISO(fri);
+    const satISO = fmtISO(sat);
+    if (!blocked.has(friISO) && !blocked.has(satISO)) {
+      results.push({ friISO, satISO, label: `${fmtDisplay(fri)} – ${fmtDisplay(sat)}` });
+    }
+    cursor.setDate(cursor.getDate() + 7);
+  }
+  return results;
+}
+
+function AvailabilityWidget({ artists, shows, pipeline, loading }) {
+  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [artistQuery, setArtistQuery] = useState('');
+  const [selectedSlug, setSelectedSlug] = useState(null);
+
+  const buckets = useMemo(
+    () => bucketArtistsForDate(artists, shows, pipeline, date),
+    [artists, shows, pipeline, date]
+  );
+
+  const artistMatches = useMemo(() => {
+    const q = artistQuery.trim().toLowerCase();
+    if (!q) return [];
+    return artists
+      .filter(a => a.name.toLowerCase().includes(q) || a.slug.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [artistQuery, artists]);
+
+  const openWeekends = useMemo(() => {
+    if (!selectedSlug) return null;
+    return findOpenWeekends(selectedSlug, shows, pipeline, 10);
+  }, [selectedSlug, shows, pipeline]);
+
+  const selectedArtist = selectedSlug ? artists.find(a => a.slug === selectedSlug) : null;
+
+  const fmtSelectedDate = d => {
+    if (!d) return '';
+    const dt = new Date(d + 'T00:00:00');
+    return dt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  };
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-bold text-white">Availability Check</h3>
+        <Link to="/artists" className="text-indigo-400 text-sm hover:underline">
+          View all artists →
+        </Link>
+      </div>
+
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-5">
+        {/* Controls */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1.5">
+              Date
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+            />
+            {date && (
+              <p className="text-gray-500 text-xs mt-1.5">{fmtSelectedDate(date)}</p>
+            )}
+          </div>
+          <div className="relative">
+            <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1.5">
+              Next open weekends
+            </label>
+            <input
+              type="text"
+              value={artistQuery}
+              onChange={e => { setArtistQuery(e.target.value); setSelectedSlug(null); }}
+              placeholder="Search artist — e.g. Junkie Kid"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600"
+            />
+            {artistQuery.trim() && !selectedSlug && artistMatches.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden">
+                {artistMatches.map(a => (
+                  <button
+                    key={a.slug}
+                    type="button"
+                    onClick={() => { setSelectedSlug(a.slug); setArtistQuery(a.name); }}
+                    className="w-full text-left px-3 py-2 text-sm text-white hover:bg-indigo-600 transition-colors"
+                  >
+                    {a.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="animate-pulse space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-4 bg-gray-800 rounded w-full" />
+            ))}
+          </div>
+        ) : (
+          <>
+            {/* Buckets */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <AvailabilityBucket
+                tone="red"
+                title="Confirmed / Advancing"
+                subtitle="Not available"
+                rows={buckets.confirmed}
+              />
+              <AvailabilityBucket
+                tone="yellow"
+                title="Hold / Pending"
+                subtitle="Tentatively unavailable"
+                rows={buckets.hold}
+              />
+              <AvailabilityBucket
+                tone="green"
+                title="Available"
+                subtitle="All other roster"
+                rows={buckets.available}
+                compact
+              />
+            </div>
+
+            {/* Open weekends */}
+            {selectedArtist && openWeekends && (
+              <div className="border-t border-gray-800 pt-4">
+                <p className="text-gray-400 text-sm mb-3">
+                  Next {openWeekends.length} open weekends for{' '}
+                  <Link to={`/artists/${selectedArtist.slug}`} className="text-white font-bold hover:text-indigo-300">
+                    {selectedArtist.name}
+                  </Link>
+                  <span className="text-gray-600"> · Fri/Sat with no shows</span>
+                </p>
+                {openWeekends.length === 0 ? (
+                  <p className="text-gray-500 text-sm">Fully booked — no open weekends in the next 2 years.</p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                    {openWeekends.map(w => (
+                      <button
+                        key={w.friISO}
+                        onClick={() => setDate(w.friISO)}
+                        className="text-left bg-emerald-950/40 border border-emerald-800/60 hover:border-emerald-500 rounded-lg px-3 py-2 text-xs text-emerald-300 transition-colors"
+                      >
+                        {w.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AvailabilityBucket({ tone, title, subtitle, rows, compact }) {
+  const toneStyles = {
+    red:    { header: 'text-red-300',     border: 'border-red-800/60',     bg: 'bg-red-950/20',     dot: 'bg-red-500' },
+    yellow: { header: 'text-yellow-300',  border: 'border-yellow-800/60',  bg: 'bg-yellow-950/20',  dot: 'bg-yellow-500' },
+    green:  { header: 'text-emerald-300', border: 'border-emerald-800/60', bg: 'bg-emerald-950/20', dot: 'bg-emerald-500' },
+  };
+  const s = toneStyles[tone];
+
+  return (
+    <div className={`${s.bg} border ${s.border} rounded-lg p-4`}>
+      <div className="flex items-center gap-2 mb-1">
+        <div className={`w-2 h-2 rounded-full ${s.dot}`} />
+        <h4 className={`text-sm font-bold uppercase tracking-wider ${s.header}`}>{title}</h4>
+        <span className="ml-auto text-gray-500 text-xs">{rows.length}</span>
+      </div>
+      <p className="text-gray-600 text-xs mb-3">{subtitle}</p>
+      {rows.length === 0 ? (
+        <p className="text-gray-600 text-xs italic">—</p>
+      ) : compact ? (
+        <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+          {rows.map(r => (
+            <Link
+              key={r.artist.slug}
+              to={`/artists/${r.artist.slug}`}
+              className="text-xs px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:border-emerald-500 hover:text-white transition-colors"
+            >
+              {r.artist.name}
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <ul className="space-y-2 max-h-48 overflow-y-auto">
+          {rows.map(r => (
+            <li key={r.artist.slug}>
+              <Link
+                to={`/artists/${r.artist.slug}`}
+                className="block hover:bg-gray-800/40 rounded px-2 py-1 -mx-2 transition-colors"
+              >
+                <div className="text-white text-sm font-semibold">{r.artist.name}</div>
+                {r.entries && r.entries.length > 0 && (
+                  <div className="text-gray-500 text-xs truncate">
+                    {r.entries.map(e => [e.venue, e.city].filter(Boolean).join(' · ')).filter(Boolean).join(' / ') || '—'}
+                  </div>
+                )}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Dashboard() {
   const [kpis, setKpis] = useState([]);
-  const [pipeline, setPipeline] = useState([]);
+  const [rosterArtists, setRosterArtists] = useState([]);
+  const [allShows, setAllShows] = useState([]);
+  const [allPipeline, setAllPipeline] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -168,9 +413,6 @@ function Dashboard() {
         const shows = showsRes.data;
         const deals = pipelineRes.data;
 
-        // Build slug → name map
-        const nameMap = Object.fromEntries(artists.map((a) => [a.slug, a.name]));
-
         // ── KPIs ──────────────────────────────────────────────────────────────
         const totalArtists = artists.length;
         const priorityCount = artists.filter((a) => a.category === 'priority').length;
@@ -193,37 +435,10 @@ function Dashboard() {
           { label: 'YTD Commission', value: `$${commission.toLocaleString()}`, sub: `15% of $${commissionableFees.toLocaleString()} confirmed`, icon: '💰', color: 'green' },
         ]);
 
-        // ── PIPELINE SNAPSHOT ─────────────────────────────────────────────────
-        // Merge confirmed shows + pipeline deals into a single sorted list
-        const showRows = shows.map((s) => ({
-          artistSlug: s.artist_slug,
-          artist: nameMap[s.artist_slug] || s.artist_slug,
-          event: s.venue,
-          date: fmtDate(s),
-          buyer: s.promoter,
-          fee: s.fee,
-          stage: s.deal_type,
-          stageColor: stageColor(s.deal_type),
-          _sortDate: s.event_date || '9999',
-        }));
-
-        const dealRows = deals.map((d) => ({
-          artistSlug: d.artist_slug,
-          artist: nameMap[d.artist_slug] || d.artist_slug,
-          event: d.venue,
-          date: fmtDate(d),
-          buyer: d.buyer_company || d.buyer,
-          fee: d.fee_offered,
-          stage: d.stage,
-          stageColor: stageColor(d.stage),
-          _sortDate: d.event_date || '9999',
-        }));
-
-        const merged = [...showRows, ...dealRows].sort((a, b) =>
-          a._sortDate.localeCompare(b._sortDate)
-        );
-
-        setPipeline(merged);
+        // ── AVAILABILITY WIDGET DATA ─────────────────────────────────────────
+        setRosterArtists(artists.slice().sort((a, b) => a.name.localeCompare(b.name)));
+        setAllShows(shows);
+        setAllPipeline(deals);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -425,64 +640,13 @@ function Dashboard() {
           </div>
         </section>
 
-        {/* ── PIPELINE SNAPSHOT ── */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-white">Active Pipeline Snapshot</h3>
-            <Link to="/artists" className="text-indigo-400 text-sm hover:underline">
-              View all artists →
-            </Link>
-          </div>
-
-          <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
-            {loading ? (
-              <div className="animate-pulse p-6 space-y-3">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-4 bg-gray-800 rounded w-full" />
-                ))}
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-800">
-                    {['Artist', 'Event', 'Date', 'Buyer', 'Fee', 'Stage'].map((h) => (
-                      <th
-                        key={h}
-                        className="text-left text-gray-500 font-semibold uppercase tracking-wider text-xs px-5 py-3"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {pipeline.map((row, i) => (
-                    <tr
-                      key={i}
-                      className="border-b border-gray-800 last:border-0 hover:bg-gray-800/50 transition-colors"
-                    >
-                      <td className="px-5 py-3.5">
-                        <Link
-                          to={`/artists/${row.artistSlug}`}
-                          className="font-bold text-white hover:text-indigo-300 transition-colors"
-                        >
-                          {row.artist}
-                        </Link>
-                      </td>
-                      <td className="px-5 py-3.5 text-gray-300">{row.event}</td>
-                      <td className="px-5 py-3.5 text-gray-400 whitespace-nowrap">{row.date}</td>
-                      <td className="px-5 py-3.5 text-gray-400">{row.buyer}</td>
-                      <td className="px-5 py-3.5 font-semibold text-emerald-400">{row.fee}</td>
-                      <td className="px-5 py-3.5">
-                        <StageBadge stage={row.stage} color={row.stageColor} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </section>
+        {/* ── AVAILABILITY CHECK ── */}
+        <AvailabilityWidget
+          artists={rosterArtists}
+          shows={allShows}
+          pipeline={allPipeline}
+          loading={loading}
+        />
 
         {/* ── FOOTER ── */}
         <footer className="mt-10 pt-6 border-t border-gray-800 text-center">

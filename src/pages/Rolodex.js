@@ -262,6 +262,7 @@ export default function Rolodex() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
+  const [marketFilter, setMarketFilter] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -286,6 +287,10 @@ export default function Rolodex() {
   const filtered = useMemo(() => {
     let rows = buyers;
     if (filterStatus) rows = rows.filter(b => b.status === filterStatus);
+    if (marketFilter.trim()) {
+      const m = marketFilter.trim().toLowerCase();
+      rows = rows.filter(b => (b.market || '').toLowerCase().includes(m));
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       rows = rows.filter(b =>
@@ -296,7 +301,7 @@ export default function Rolodex() {
       );
     }
     return rows;
-  }, [buyers, filterStatus, search]);
+  }, [buyers, filterStatus, marketFilter, search]);
 
   function handleStatusChange(id, newStatus) {
     setBuyers(prev => prev.map(b => b.id === id ? { ...b, status: newStatus } : b));
@@ -343,6 +348,25 @@ export default function Rolodex() {
           >
             + Add Buyer
           </button>
+        </div>
+
+        {/* Market filter */}
+        <div className="mb-3">
+          <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1.5">
+            Filter by market
+          </label>
+          <input
+            type="text"
+            value={marketFilter}
+            onChange={e => setMarketFilter(e.target.value)}
+            placeholder="Type a market — e.g. Miami, NYC, Los Angeles…"
+            className="w-full sm:max-w-md bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-4 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600"
+          />
+          {marketFilter.trim() && (
+            <p className="text-gray-500 text-xs mt-1.5">
+              {filtered.length} buyer{filtered.length !== 1 ? 's' : ''} in markets matching "{marketFilter.trim()}"
+            </p>
+          )}
         </div>
 
         {/* Search + Filters */}

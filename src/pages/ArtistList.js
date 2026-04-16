@@ -22,6 +22,26 @@ const tierConfig = {
   },
 };
 
+// ── TAB DEFINITIONS ──────────────────────────────────────────────────────────
+const ROSTER_SLUGS = [
+  'shogun', 'junkie-kid', 'clawz', 'drakk', 'hellbound', 'triptykh', 'anime',
+  'mad-dog', 'morelia', 'jenna-shaw', 'anoluxx', 'water-spirit', 'dea-magna',
+  'ketting', 'dr-greco', 'death-code', 'jay-toledo', 'jayr', 'lara-klart',
+  'mandy', 'naomi-luna', 'pixie-dust', 'sihk', 'taylor-torrence', 'the-purge',
+  'cyboy', 'gioh-cecato', 'fernanda-martins',
+];
+
+const EUROPEAN_SLUGS = [
+  'mandy', 'the-purge', 'mad-dog', 'ketting', 'hellbound', 'morelia',
+  'pixie-dust', 'fernanda-martins', 'triptykh', 'drakk',
+];
+
+const TABS = [
+  { id: 'roster',   label: 'Roster',            subtitle: 'Active roster' },
+  { id: 'european', label: 'European Artists',  subtitle: 'Touring Europe' },
+  { id: 'leo',      label: "Leo's Artists",     subtitle: 'Leo Corson roster' },
+];
+
 // Format integer follower counts for display: 13000 → "13K", 253000 → "253K"
 function fmtCount(n) {
   if (!n) return null;
@@ -96,6 +116,7 @@ export default function ArtistList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState('roster');
 
   useEffect(() => {
     async function load() {
@@ -139,16 +160,25 @@ export default function ArtistList() {
   }, []);
 
   const q = search.trim().toLowerCase();
+
+  // Build tab buckets. Preserve configured ordering for Roster + European tabs.
+  const bySlug = Object.fromEntries(artists.map(a => [a.slug, a]));
+  const rosterTab   = ROSTER_SLUGS.map(slug => bySlug[slug]).filter(Boolean);
+  const europeanTab = EUROPEAN_SLUGS.map(slug => bySlug[slug]).filter(Boolean);
+  const leoTab      = artists.filter(a => a.category === 'leo');
+
+  const tabArtists = activeTab === 'roster' ? rosterTab
+                   : activeTab === 'european' ? europeanTab
+                   : leoTab;
+
   const filtered = q
-    ? artists.filter(a =>
+    ? tabArtists.filter(a =>
         a.name.toLowerCase().includes(q) ||
         (a.genre || '').toLowerCase().includes(q)
       )
-    : artists;
+    : tabArtists;
 
-  const priority = filtered.filter((a) => a.category === 'priority');
-  const roster   = filtered.filter((a) => a.category === 'roster');
-  const leo      = filtered.filter((a) => a.category === 'leo');
+  const tabCounts = { roster: rosterTab.length, european: europeanTab.length, leo: leoTab.length };
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: '#111827' }}>
@@ -168,18 +198,35 @@ export default function ArtistList() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
-            <h2 className="text-2xl font-bold text-white">Artist Roster</h2>
+            <h2 className="text-2xl font-bold text-white">Artists</h2>
             <p className="text-gray-500 text-sm mt-1">
-              {loading ? 'Loading…' : `${artists.length} artists total`}
+              {loading ? 'Loading…' : `${tabCounts.roster} roster · ${tabCounts.european} European · ${tabCounts.leo} Leo's`}
             </p>
           </div>
-          <div className="flex items-center gap-3 text-xs">
-            {Object.entries(tierConfig).map(([key, val]) => (
-              <div key={key} className="flex items-center gap-1.5">
-                <div className={`w-2 h-2 rounded-full ${val.dot}`} />
-                <span className="text-gray-400">{val.label}</span>
-              </div>
-            ))}
+        </div>
+
+        {/* Tabs */}
+        <div className="mb-6 border-b border-gray-800">
+          <div className="flex flex-wrap gap-1">
+            {TABS.map(t => {
+              const active = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveTab(t.id)}
+                  className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${
+                    active
+                      ? 'border-indigo-500 text-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {t.label}
+                  <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${active ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-500'}`}>
+                    {tabCounts[t.id]}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -189,7 +236,7 @@ export default function ArtistList() {
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search by name or genre…"
+            placeholder="Search within tab by name or genre…"
             className="w-full sm:max-w-sm bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-4 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600"
           />
           {q && (
@@ -221,70 +268,23 @@ export default function ArtistList() {
 
         {!loading && !error && (
           <>
-            {q && filtered.length === 0 && (
+            {filtered.length === 0 ? (
               <div className="bg-gray-900 rounded-xl border border-gray-800 px-5 py-10 text-center">
-                <p className="text-gray-500 text-sm">No artists match "{search}".</p>
+                <p className="text-gray-500 text-sm">
+                  {q ? `No artists match "${search}" in this tab.` : 'No artists in this tab.'}
+                </p>
               </div>
-            )}
-
-            {/* ── PRIORITY ── */}
-            {priority.length > 0 && (
-              <section className="mb-10">
-                <div className="flex items-center gap-2 mb-4">
-                  <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Priority Artists</h3>
-                  <span className="text-gray-600 text-xs bg-gray-800 px-2 py-0.5 rounded-full">{priority.length}</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {priority.map((a) => (
-                    <ArtistCard
-                      key={a.slug} artist={a}
-                      confirmedCount={showCounts[a.slug] || 0}
-                      pipelineCount={pipelineCounts[a.slug] || 0}
-                      confirmedFeeTotal={showFees[a.slug] || 0}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* ── FULL ROSTER ── */}
-            {roster.length > 0 && (
-              <section className="mb-10">
-                <div className="flex items-center gap-2 mb-4">
-                  <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Full Roster</h3>
-                  <span className="text-gray-600 text-xs bg-gray-800 px-2 py-0.5 rounded-full">{roster.length}</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {roster.map((a) => (
-                    <ArtistCard
-                      key={a.slug} artist={a}
-                      confirmedCount={showCounts[a.slug] || 0}
-                      pipelineCount={pipelineCounts[a.slug] || 0}
-                      confirmedFeeTotal={showFees[a.slug] || 0}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* ── LEO'S ARTISTS ── */}
-            {leo.length > 0 && (
-              <section className="mb-10">
-                <div className="flex items-center gap-2 mb-4">
-                  <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Leo's Artists</h3>
-                  <span className="text-gray-600 text-xs bg-gray-800 px-2 py-0.5 rounded-full">{leo.length}</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {leo.map((a) => (
-                    <ArtistCard
-                      key={a.slug} artist={a}
-                      confirmedCount={showCounts[a.slug] || 0}
-                      pipelineCount={pipelineCounts[a.slug] || 0}
-                      confirmedFeeTotal={showFees[a.slug] || 0}
-                    />
-                  ))}
-                </div>
-              </section>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {filtered.map((a) => (
+                  <ArtistCard
+                    key={a.slug} artist={a}
+                    confirmedCount={showCounts[a.slug] || 0}
+                    pipelineCount={pipelineCounts[a.slug] || 0}
+                    confirmedFeeTotal={showFees[a.slug] || 0}
+                  />
+                ))}
+              </div>
             )}
           </>
         )}
