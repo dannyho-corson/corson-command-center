@@ -10,6 +10,7 @@ import Rolodex from './pages/Rolodex';
 import Financials from './pages/Financials';
 import ArtistShare from './pages/ArtistShare';
 import Nav from './components/Nav';
+import IndustryIntelWidget from './components/IndustryIntelWidget';
 import { supabase } from './lib/supabase';
 
 // ── URGENT ISSUES SEED DATA ───────────────────────────────────────────────────
@@ -525,6 +526,11 @@ function Dashboard() {
               Open Master Grid
             </a>
           </div>
+        </section>
+
+        {/* ── INDUSTRY INTEL ── */}
+        <section className="mb-8">
+          <IndustryIntelWidget />
         </section>
 
         {/* ── DUE TODAY ── */}
