@@ -120,53 +120,138 @@ function runChromeJS(jsSource) {
 }
 
 // ─── outlook scraping ─────────────────────────────────────────────────────
+const SCRAPE_TARGET = 30;       // minimum rows to load
+const SCRAPE_MAX = 60;           // soft cap to bound work
+const SCROLL_MAX_ITERS = 20;
+
 function scrapeOutlook() {
-  // Single-call synchronous extraction. Outlook's row aria-label contains
-  // sender + subject + time + preview — enough for keyword classification
-  // without having to click through each email (fragile UI automation).
-  const result = runChromeJS(`
-    var rows = Array.from(document.querySelectorAll('[role="option"][aria-label]'));
-    // Filter out folder-tree rows
-    rows = rows.filter(function(r){
-      var a = r.getAttribute('aria-label') || '';
-      return a.length > 30 && !r.closest('[role="tree"]');
-    });
-    // Today's emails: Outlook shows "H:MM AM/PM" for today, dates otherwise
-    var todayRows = rows.filter(function(r){
-      return /\\b\\d{1,2}:\\d{2}\\s?(AM|PM)\\b/i.test(r.getAttribute('aria-label') || '');
-    });
+  // Phase 1: kick off scroll+collect. Outlook's list is heavily virtualized —
+  // only ~10 rows live in DOM at a time. We accumulate aria-labels into a Set
+  // as we scroll, since rows unmount as they pass out of view.
+  const kickoff = runChromeJS(`
+    window._corson = { done: false, error: null, progress: 'starting', emails: [] };
 
-    var emails = todayRows.map(function(r){
-      var label = r.getAttribute('aria-label') || '';
-      // Strip leading state flags: "Collapsed", "Has attachments", "Replied", "Forwarded"
-      var cleaned = label.replace(/^(Collapsed|Expanded|Has attachments|Replied|Forwarded|Flagged|Unread|Read)\\s+/gi, '')
-                         .replace(/^(Collapsed|Expanded|Has attachments|Replied|Forwarded|Flagged|Unread|Read)\\s+/gi, '')
-                         .replace(/^(Collapsed|Expanded|Has attachments|Replied|Forwarded|Flagged|Unread|Read)\\s+/gi, '');
-      // Split at the time marker: before = sender+subject, after = preview
-      var timeMatch = cleaned.match(/\\s(\\d{1,2}:\\d{2}\\s?(?:AM|PM))\\s/i);
-      var head = cleaned, time = '', preview = '';
-      if (timeMatch) {
-        head = cleaned.slice(0, timeMatch.index).trim();
-        time = timeMatch[1];
-        preview = cleaned.slice(timeMatch.index + timeMatch[0].length).trim();
+    (async function(){
+      try {
+        function getRows(){
+          return Array.from(document.querySelectorAll('[role="option"][aria-label]'))
+            .filter(function(r){
+              var a = r.getAttribute('aria-label') || '';
+              return a.length > 30 && !r.closest('[role="tree"]');
+            });
+        }
+
+        var firstRow = getRows()[0];
+        if (!firstRow) { window._corson.progress = 'no mail rows visible'; window._corson.done = true; return; }
+
+        // Find the first ancestor that is actually scrollable (overflow auto/scroll AND scrollHeight > clientHeight)
+        var scrollable = firstRow;
+        while (scrollable && scrollable !== document.body) {
+          var cs = getComputedStyle(scrollable);
+          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && scrollable.scrollHeight > scrollable.clientHeight + 50) break;
+          scrollable = scrollable.parentElement;
+        }
+        if (!scrollable || scrollable === document.body) scrollable = document.scrollingElement || document.documentElement;
+
+        var targetMin = ${SCRAPE_TARGET};
+        var targetMax = ${SCRAPE_MAX};
+        var seen = new Map();           // aria-label → row snapshot (preserves first-seen order via insertion order)
+        var stableScroll = 0;
+        var lastScrollTop = -1;
+        var scrollStep = Math.max(scrollable.clientHeight - 80, 400);
+
+        // Reset to top first for consistent ordering
+        scrollable.scrollTop = 0;
+        await new Promise(function(r){ setTimeout(r, 400); });
+
+        for (var i = 0; i < ${SCROLL_MAX_ITERS}; i++) {
+          // Snapshot currently-rendered rows
+          getRows().forEach(function(r){
+            var a = r.getAttribute('aria-label') || '';
+            if (a && !seen.has(a)) seen.set(a, true);
+          });
+          window._corson.progress = 'iter ' + i + ', seen=' + seen.size + ', scrollTop=' + Math.round(scrollable.scrollTop) + '/' + scrollable.scrollHeight;
+
+          if (seen.size >= targetMax) break;
+
+          // Advance by one viewport
+          var prevTop = scrollable.scrollTop;
+          scrollable.scrollTop = prevTop + scrollStep;
+          await new Promise(function(r){ setTimeout(r, 700); });
+
+          if (Math.abs(scrollable.scrollTop - lastScrollTop) < 5) {
+            stableScroll++;
+            if (stableScroll >= 3) break; // can't scroll further (at bottom or stuck)
+          } else {
+            stableScroll = 0;
+          }
+          lastScrollTop = scrollable.scrollTop;
+
+          // If we hit target min and have scrolled at least a few viewports, good enough
+          if (seen.size >= targetMin && i >= 4) {
+            // keep going up to max, but this is the earliest acceptable exit
+          }
+        }
+
+        // Final snapshot in case last scroll revealed new rows
+        getRows().forEach(function(r){
+          var a = r.getAttribute('aria-label') || '';
+          if (a && !seen.has(a)) seen.set(a, true);
+        });
+
+        var stripRe = /^(Collapsed|Expanded|Has attachments|Replied|Forwarded|Flagged|Unread|Read|Mentioned|Important)\\s+/i;
+        var labels = Array.from(seen.keys()).slice(0, targetMax);
+
+        var emails = labels.map(function(label){
+          var cleaned = label;
+          for (var k = 0; k < 6; k++) { var next = cleaned.replace(stripRe, ''); if (next === cleaned) break; cleaned = next; }
+          var timeMatch = cleaned.match(/\\s(\\d{1,2}:\\d{2}\\s?(?:AM|PM))\\s/i);
+          var dateMatch = cleaned.match(/\\s((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d{1,2}(?:,?\\s+20\\d{2})?)\\s/);
+          var dayMatch = cleaned.match(/\\s(Yesterday|Mon|Tue|Wed|Thu|Fri|Sat|Sun)\\s/);
+          var splitMatch = timeMatch || dateMatch || dayMatch;
+          var head = cleaned, marker = '', preview = '';
+          if (splitMatch) {
+            head = cleaned.slice(0, splitMatch.index).trim();
+            marker = splitMatch[1];
+            preview = cleaned.slice(splitMatch.index + splitMatch[0].length).trim();
+          }
+          return {
+            ariaLabel: label,
+            subject: head,
+            from: head.split(/;|,/)[0].trim(),
+            time: marker,
+            body: preview
+          };
+        });
+
+        window._corson.emails = emails;
+        window._corson.done = true;
+      } catch (e) {
+        window._corson.error = String(e && e.message || e);
+        window._corson.done = true;
       }
-      // Head usually looks like "Sender Name Subject Line" — naive split at first ALL-CAPS or known sep
-      // Just use the whole head as context.
-      return {
-        ariaLabel: label,
-        subject: head,
-        from: head.split(/;|,/)[0].trim(),
-        time: time,
-        body: preview, // preview text — classification input
-        date: new Date().toISOString().slice(0, 10)
-      };
-    });
+    })();
 
-    return emails;
+    return 'started';
   `);
 
-  if (!result.ok) throw new Error(result.error);
-  return result.value || [];
+  if (!kickoff.ok) throw new Error(kickoff.error);
+
+  // Phase 2: poll until done
+  const pollDeadline = Date.now() + 90_000;
+  while (Date.now() < pollDeadline) {
+    if (Date.now() - START > TIMEOUT_MS - 30_000) throw new Error('Approaching global timeout — aborting scrape');
+    execFileSync('sleep', ['1.0']);
+    const poll = runChromeJS(`return JSON.stringify(window._corson || { done: false, progress: 'no state' });`);
+    if (!poll.ok) throw new Error(poll.error);
+    const state = JSON.parse(poll.value);
+    log(`scrape: ${state.progress}`);
+    if (state.done) {
+      if (state.error) throw new Error(`Chrome scrape error: ${state.error}`);
+      return state.emails || [];
+    }
+  }
+  throw new Error('Scrape polling timed out');
 }
 
 // ─── classification ───────────────────────────────────────────────────────
@@ -199,10 +284,15 @@ const ARTIST_PATTERNS = [
   ['cyboy',        [/\bcyboy\b/i]],
   ['mandy',        [/\bmandy\b/i]],
   ['fernanda-martins', [/\bfernanda[\s-]?martins\b/i]],
+  ['anoluxx',      [/\banoluxx\b/i]],
+  ['jayr',         [/\bjayr\b/i]],
   ['tnt',          [/\btnt\b/i]],
   ['dual-damage',  [/\bdual[\s-]?damage\b/i]],
   ['the-purge',    [/\bthe[\s-]?purge\b/i]],
   ['casska',       [/\bcasska\b/i]],
+  ['sub-zero-project', [/\bsub[\s-]?zero[\s-]?project\b/i]],
+  ['melody-man',   [/\bmelody[\s-]?man\b/i]],
+  ['frontliner',   [/\bfrontliner\b/i]],
 ];
 
 const SHOW_TRIGGERS     = /\b(confirmed|confirmado|contract signed|deposit paid|advancing|settlement)\b/i;
@@ -263,10 +353,14 @@ function extractFee(text) {
 }
 
 function extractCityVenue(text) {
-  // Best-effort: look for "at <Venue>" and "in <City>" — loose
-  const venue = text.match(/\bat\s+([A-Z][A-Za-z0-9 '&\-]{2,40})/);
-  const city  = text.match(/\bin\s+([A-Z][A-Za-z \-]{2,30})/);
-  return { venue: venue?.[1]?.trim() || null, city: city?.[1]?.trim() || null };
+  // Corson confirmation pattern: "CITY, STATE [VENUE]" — reliable when present
+  const venueBracket = text.match(/\[([^\]\n]{2,60})\]/);
+  // Two-letter state abbrev before/after a city: "Las Vegas, NV" / "Oakland, CA"
+  const cityState = text.match(/\b([A-Z][A-Za-z'\- ]{2,30}),\s*([A-Z]{2})\b/);
+  return {
+    venue: venueBracket?.[1]?.trim() || null,
+    city: cityState?.[1]?.trim() || null,
+  };
 }
 
 function classifyEmail(email) {
@@ -352,6 +446,15 @@ async function existsUrgent(supabase, slug, issue) {
   if (!slug || !issue) return false;
   const { data } = await supabase.from('urgent_issues')
     .select('id').eq('artist_slug', slug).eq('issue', issue).eq('resolved', false).limit(1);
+  return (data?.length || 0) > 0;
+}
+
+async function existsActivity(supabase, slug, description) {
+  if (!slug || !description) return false;
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await supabase.from('activity_log')
+    .select('id').eq('artist_slug', slug).eq('description', description)
+    .gte('created_at', sevenDaysAgo).limit(1);
   return (data?.length || 0) > 0;
 }
 
@@ -494,6 +597,10 @@ function finalize(extra = {}) {
           if (error) { recordError(`urgent insert ${row.artist_slug}`, error); continue; }
           inserted.urgent.push(data); counts.urgent++;
         } else if (kind === 'activity') {
+          if (await existsActivity(supabase, row.artist_slug, row.description)) {
+            skipped.push(`activity dup: ${row.artist_slug} — ${row.description.slice(0, 40)}`);
+            counts.skipped++; continue;
+          }
           const { data, error } = await supabase.from('activity_log').insert(row).select().single();
           if (error) { recordError(`activity insert ${row.artist_slug}`, error); continue; }
           inserted.activity.push(data); counts.activity++;
