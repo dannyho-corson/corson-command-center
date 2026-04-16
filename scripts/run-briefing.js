@@ -444,32 +444,26 @@ ${industryBible || '(not loaded)'}`.slice(0, 60_000);
 }
 
 // ─── outlook desktop draft via applescript ────────────────────────────────
+function applescriptEscape(s) {
+  // AppleScript string literals: escape \ and ", convert newlines to \n (literal)
+  return String(s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n');
+}
 function createOutlookDraft({ to_email, subject, body }) {
   const tagged = `[AI DRAFT – REVIEW] ${subject || ''}`.slice(0, 240);
-  const tmp = path.join(os.tmpdir(), `corson_draft_${process.pid}_${Date.now()}.json`);
-  fs.writeFileSync(tmp, JSON.stringify({ to_email, subject: tagged, body: body || '' }), 'utf8');
-  const applescript = `
-    use framework "Foundation"
-    set jsonStr to read POSIX file "${tmp}" as «class utf8»
-    set NSString to current application's NSString
-    set ns to NSString's stringWithString:jsonStr
-    set data to ns's dataUsingEncoding:4
-    set {obj, err} to current application's NSJSONSerialization's JSONObjectWithData:data options:0 |error|:(reference)
-    set toEmail to (obj's objectForKey:"to_email") as text
-    set subj to (obj's objectForKey:"subject") as text
-    set bodyText to (obj's objectForKey:"body") as text
+  const script = `
     tell application "Microsoft Outlook"
-      set newMsg to make new outgoing message with properties {subject:subj, content:bodyText}
-      make new recipient at newMsg with properties {email address:{address:toEmail}}
-      save newMsg
+      set newMsg to make new outgoing message with properties {subject:"${applescriptEscape(tagged)}", content:"${applescriptEscape(body)}"}
+      make new recipient at newMsg with properties {email address:{address:"${applescriptEscape(to_email)}"}}
     end tell
     return "OK"
   `;
+  const tmp = path.join(os.tmpdir(), `corson_draft_${process.pid}_${Date.now()}.applescript`);
+  fs.writeFileSync(tmp, script, 'utf8');
   try {
-    const out = execFileSync('osascript', ['-e', applescript], { encoding: 'utf8', timeout: 15_000 });
+    const out = execFileSync('osascript', [tmp], { encoding: 'utf8', timeout: 15_000 });
     return out.trim() === 'OK';
   } catch (e) {
-    throw new Error(`Outlook AppleScript: ${e.message}`);
+    throw new Error(`Outlook AppleScript: ${e.message.split('\n')[0].slice(0, 200)}`);
   } finally {
     try { fs.unlinkSync(tmp); } catch {}
   }

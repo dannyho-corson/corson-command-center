@@ -15,8 +15,26 @@ CREATE TABLE IF NOT EXISTS processed_emails (
   classified_as TEXT
 );
 
+-- If a prior partial migration created processed_emails without these columns,
+-- add them now. All statements are IF NOT EXISTS so safe to re-run.
+ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS message_id    TEXT;
+ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS run_status    TEXT;
+ALTER TABLE processed_emails ADD COLUMN IF NOT EXISTS classified_as TEXT;
+
+-- Ensure message_id has a UNIQUE constraint for dedup. Safe re-run via DO block.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'processed_emails_message_id_key'
+  ) THEN
+    ALTER TABLE processed_emails ADD CONSTRAINT processed_emails_message_id_key UNIQUE (message_id);
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS processed_emails_processed_at_idx
   ON processed_emails (processed_at DESC);
+CREATE INDEX IF NOT EXISTS processed_emails_message_id_idx
+  ON processed_emails (message_id);
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- industry_intel: festivals, buyers, agencies, scene trends
