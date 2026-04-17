@@ -349,11 +349,14 @@ async function validArtistSlugs(supabase) {
 }
 // Preflight — set once at startup based on table existence
 let PROCESSED_EMAILS_AVAILABLE = false;
+let PROCESSED_EMAILS_HAS_MESSAGE_HASH = false; // legacy column on older schemas
 async function probeProcessedEmails(supabase) {
   const { error } = await supabase.from('processed_emails').select('message_id').limit(1);
   PROCESSED_EMAILS_AVAILABLE = !error;
-  if (error) log(`processed_emails table not found — message-id dedup disabled. Apply sql/briefing_intelligence.sql in Supabase to enable.`);
-  else log('processed_emails: available');
+  if (error) { log(`processed_emails table not found — message-id dedup disabled. Apply sql/briefing_intelligence.sql in Supabase to enable.`); return; }
+  const { error: hashErr } = await supabase.from('processed_emails').select('message_hash').limit(1);
+  PROCESSED_EMAILS_HAS_MESSAGE_HASH = !hashErr;
+  log(`processed_emails: available${PROCESSED_EMAILS_HAS_MESSAGE_HASH ? ' (with legacy message_hash column)' : ''}`);
 }
 async function isProcessed(supabase, message_id) {
   if (!PROCESSED_EMAILS_AVAILABLE) return false;
@@ -362,7 +365,9 @@ async function isProcessed(supabase, message_id) {
 }
 async function markProcessed(supabase, message_id, subject, sender, classified_as) {
   if (!PROCESSED_EMAILS_AVAILABLE) return;
-  const { error } = await supabase.from('processed_emails').insert({ message_id, subject, sender, classified_as });
+  const row = { message_id, subject, sender, classified_as };
+  if (PROCESSED_EMAILS_HAS_MESSAGE_HASH) row.message_hash = message_id;
+  const { error } = await supabase.from('processed_emails').insert(row);
   if (error && !/duplicate|unique/i.test(error.message)) recordError(`processed_emails ${message_id}`, error);
 }
 async function existsShow(s, slug, d)   { if (!slug||!d) return false; const { data } = await s.from('shows').select('id').eq('artist_slug',slug).eq('event_date',d).limit(1); return (data?.length||0)>0; }
