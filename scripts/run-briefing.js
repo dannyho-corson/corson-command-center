@@ -469,6 +469,33 @@ function createOutlookDraft({ to_email, subject, body }) {
   }
 }
 
+// ─── regenerate grids ─────────────────────────────────────────────────────
+// Shells out to scripts/generate-grids.js so the Master Touring Grid and all
+// per-artist Excel files reflect the briefing's fresh inserts. Logs a separate
+// line to briefing-log.txt on success so Danny can see grid freshness without
+// opening the full sync-log.
+function regenerateGrids() {
+  const remaining = TIMEOUT_MS - (Date.now() - START) - 10_000; // leave 10s for finalize
+  if (remaining < 30_000) {
+    log('skipping grid regen — not enough time budget remaining');
+    return { ok: false, reason: 'low time budget' };
+  }
+  log('regenerating Excel grids…');
+  try {
+    const out = execFileSync('node', [path.join(PROJECT, 'scripts/generate-grids.js')], {
+      encoding: 'utf8',
+      cwd: PROJECT,
+      timeout: Math.min(remaining, 180_000),
+    });
+    log(`grids regenerated (${out.split('\n').length} lines of output)`);
+    return { ok: true };
+  } catch (e) {
+    recordError('grids', new Error(e.message?.split('\n')[0]?.slice(0, 200) || 'unknown'));
+    return { ok: false, reason: e.message?.split('\n')[0] || 'unknown' };
+  }
+}
+let gridsResult = null;
+
 // ─── finalize ─────────────────────────────────────────────────────────────
 let finalizeRan = false;
 function finalize(extra = {}) {
@@ -479,7 +506,12 @@ function finalize(extra = {}) {
   const pad = n => String(n).padStart(2, '0');
   const stamp = `${ts.getFullYear()}-${pad(ts.getMonth()+1)}-${pad(ts.getDate())} ${pad(ts.getHours())}:${pad(ts.getMinutes())}`;
   const line = `[${stamp}] status=${status} | emails=${counts.emails} | new=${counts.new} | shows=${counts.shows} | pipeline=${counts.pipeline} | urgent=${counts.urgent} | drafts=${counts.drafts}\n`;
-  try { fs.mkdirSync(path.dirname(BRIEFING_LOG), { recursive: true }); fs.appendFileSync(BRIEFING_LOG, line); } catch (e) { console.error(`briefing log: ${e.message}`); }
+  try {
+    fs.mkdirSync(path.dirname(BRIEFING_LOG), { recursive: true });
+    fs.appendFileSync(BRIEFING_LOG, line);
+    if (gridsResult?.ok) fs.appendFileSync(BRIEFING_LOG, `[${stamp}] Grids regenerated\n`);
+    else if (gridsResult) fs.appendFileSync(BRIEFING_LOG, `[${stamp}] Grids FAILED: ${gridsResult.reason}\n`);
+  } catch (e) { console.error(`briefing log: ${e.message}`); }
   try {
     const header = `\n${'='.repeat(70)}\nDAILY BRIEFING RUN: ${ts.toISOString()}\n${'='.repeat(70)}\n`;
     const summary =
@@ -502,6 +534,7 @@ function finalize(extra = {}) {
   console.log(`Activity logs:          ${counts.activity}`);
   console.log(`Drafts saved:           ${counts.drafts}`);
   console.log(`Skipped:                ${counts.skipped}`);
+  console.log(`Grids regenerated:      ${gridsResult?.ok ? 'yes' : (gridsResult ? 'FAILED (' + gridsResult.reason + ')' : 'not run')}`);
   if (intelligence?.summary) {
     console.log('\n' + '─'.repeat(60));
     console.log('INTELLIGENT SUMMARY');
@@ -619,6 +652,9 @@ function finalize(extra = {}) {
       } catch (e) { recordError(`draft ${d.to_email}`, e); }
     }
   }
+
+  // ─── regenerate excel grids from fresh Supabase state ─────────────────
+  gridsResult = regenerateGrids();
 
   finalize();
   process.exit(errors.length ? 1 : 0);
