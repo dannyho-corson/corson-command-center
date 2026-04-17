@@ -388,11 +388,13 @@ async function runClaudeLayer(env, supabase, newEmails, validSlugs) {
   const Anthropic = require(path.join(PROJECT, 'node_modules/@anthropic-ai/sdk')).default;
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
-  // Load current pipeline + urgent issues state
-  const [{ data: pipelineRows }, { data: urgentRows }, { data: artistRows }] = await Promise.all([
+  // Load current pipeline + urgent issues + existing buyers + targets for context
+  const [{ data: pipelineRows }, { data: urgentRows }, { data: artistRows }, { data: buyerRows }, { data: targetRows }] = await Promise.all([
     supabase.from('pipeline').select('artist_slug, stage, venue, market, buyer, buyer_company, fee_offered, event_date, notes').order('event_date', { ascending: true }).limit(200),
     supabase.from('urgent_issues').select('artist_slug, issue, priority').eq('resolved', false).limit(50),
     supabase.from('artists').select('slug, name, manager_email').limit(100),
+    supabase.from('buyers').select('name, email, company').limit(500),
+    supabase.from('targets').select('id, artist_slug, promoter, contact, status').limit(500),
   ]);
 
   let industryBible = '';
@@ -404,7 +406,9 @@ You MUST return valid JSON matching this exact schema:
 {
   "summary": "2-3 sentence plain-English briefing of what matters today",
   "urgent": [{"artist_slug": "...", "issue": "...", "priority": "High|Medium|Low", "why_urgent": "...", "suggested_action": "..."}],
-  "draft_replies": [{"to_email": "email@example.com", "subject": "...", "body": "..."}]
+  "draft_replies": [{"to_email": "email@example.com", "subject": "...", "body": "..."}],
+  "new_buyers": [{"name": "...", "email": "...", "company": "...", "market": "..."}],
+  "target_updates": [{"target_id": "<uuid>", "new_status": "...", "note": "..."}]
 }
 
 Rules:
@@ -438,6 +442,19 @@ PRIORITY RUBRIC — assign "priority" for each urgent item using these rules exa
 
 If an item doesn't clearly fit any bucket, default to "Medium".
 
+NEW BUYERS — extract from today's emails any sender who looks like a promoter/buyer and is NOT already in the provided existing_buyers list. For each:
+  - name: human name (e.g. "Jane Smith")
+  - email: full email address (parse from reply-to, signature, or quoted header)
+  - company: promoter/venue/festival name if mentioned ("Insomniac", "Cave Rave", etc.)
+  - market: city/region if mentioned ("Miami, FL", "Denver")
+Return [] if no new promoters visible. Skip internal senders (Corson Agency team, Leo, Danny, the artists themselves, their managers) — those are not buyers.
+
+TARGET UPDATES — for each email today, if the sender matches an existing target in the provided targets list (by email OR fuzzy-match on promoter name), return a target_update:
+  - target_id: the UUID from the provided targets list
+  - new_status: "Contacted" (general reply), "In Conversation" (active inquiry/avail thread), "Offer Sent" (formal offer exchanged), or "Confirmed" (deal locked)
+  - note: one-line summary of today's interaction (e.g. "4/17 — responded to Boston 6/26 offer")
+Only include a target_update when there IS a matching row in the targets list. Return [] otherwise.
+
 INDUSTRY CONTEXT:
 ${industryBible || '(not loaded)'}`.slice(0, 60_000);
 
@@ -446,6 +463,8 @@ ${industryBible || '(not loaded)'}`.slice(0, 60_000);
     current_pipeline: pipelineRows || [],
     current_urgent_issues: urgentRows || [],
     roster: artistRows || [],
+    existing_buyers: (buyerRows || []).map(b => ({ email: b.email, name: b.name, company: b.company })),
+    targets: (targetRows || []).map(t => ({ id: t.id, artist_slug: t.artist_slug, promoter: t.promoter, contact: t.contact, status: t.status })),
   }, null, 2);
 
   try {
@@ -463,9 +482,11 @@ ${industryBible || '(not loaded)'}`.slice(0, 60_000);
     if (!parsed.summary) parsed.summary = '(no summary)';
     if (!Array.isArray(parsed.urgent)) parsed.urgent = [];
     if (!Array.isArray(parsed.draft_replies)) parsed.draft_replies = [];
+    if (!Array.isArray(parsed.new_buyers)) parsed.new_buyers = [];
+    if (!Array.isArray(parsed.target_updates)) parsed.target_updates = [];
     // Validate artist slugs in urgent
     parsed.urgent = parsed.urgent.filter(u => validSlugs.has(u.artist_slug));
-    log(`Claude returned: ${parsed.urgent.length} urgent, ${parsed.draft_replies.length} drafts`);
+    log(`Claude returned: ${parsed.urgent.length} urgent, ${parsed.draft_replies.length} drafts, ${parsed.new_buyers.length} new buyers, ${parsed.target_updates.length} target updates`);
     return parsed;
   } catch (e) {
     recordError('claude', e);
@@ -563,6 +584,8 @@ function finalize(extra = {}) {
   console.log(`Urgent inserted:        ${counts.urgent}`);
   console.log(`Activity logs:          ${counts.activity}`);
   console.log(`Drafts saved:           ${counts.drafts}`);
+  console.log(`New buyers (Rolodex):   ${counts.buyers || 0}`);
+  console.log(`Target list updates:    ${counts.targets || 0}`);
   console.log(`Skipped:                ${counts.skipped}`);
   console.log(`Grids regenerated:      ${gridsResult?.ok ? 'yes' : (gridsResult ? 'FAILED (' + gridsResult.reason + ')' : 'not run')}`);
   if (intelligence?.summary) {
@@ -681,6 +704,57 @@ function finalize(extra = {}) {
         inserted.drafts.push(d);
         counts.drafts++;
       } catch (e) { recordError(`draft ${d.to_email}`, e); }
+    }
+  }
+
+  // ─── auto-insert new buyers into Rolodex ──────────────────────────────
+  if (intelligence?.new_buyers?.length) {
+    for (const b of intelligence.new_buyers) {
+      if (!b.email) continue;
+      const email = String(b.email).trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) continue;
+      try {
+        const { data: existing } = await supabase.from('buyers').select('id').ilike('email', email).limit(1);
+        if (existing && existing.length > 0) { skipped.push(`buyer dup: ${email}`); counts.skipped++; continue; }
+        const row = {
+          name: b.name || null,
+          email,
+          company: b.company || null,
+          market: b.market || null,
+          status: 'Cold',
+          notes: `[auto-imported from email ${new Date().toISOString().slice(0,10)}]`,
+        };
+        const { data, error: ierr } = await supabase.from('buyers').insert(row).select().single();
+        if (ierr) { recordError(`buyer insert ${email}`, ierr); continue; }
+        inserted.buyers = inserted.buyers || [];
+        inserted.buyers.push(data);
+        counts.buyers = (counts.buyers || 0) + 1;
+        log(`  + Rolodex: ${b.name || '(no name)'} / ${b.company || '(no company)'} <${email}>`);
+      } catch (e) { recordError(`buyer ${email}`, e); }
+    }
+  }
+
+  // ─── auto-update target list outreach status ──────────────────────────
+  if (intelligence?.target_updates?.length) {
+    for (const u of intelligence.target_updates) {
+      if (!u.target_id) continue;
+      const statusWhitelist = ['Contacted', 'In Conversation', 'Offer Sent', 'Confirmed'];
+      const newStatus = statusWhitelist.includes(u.new_status) ? u.new_status : 'Contacted';
+      try {
+        const { data: cur } = await supabase.from('targets').select('id, promoter, notes, status').eq('id', u.target_id).limit(1);
+        if (!cur || cur.length === 0) { skipped.push(`target missing: ${u.target_id}`); counts.skipped++; continue; }
+        const today = new Date().toISOString().slice(0, 10);
+        const stampedNote = u.note ? `${today}: ${u.note}` : `${today}: contact logged`;
+        const newNotes = cur[0].notes ? `${cur[0].notes}\n${stampedNote}` : stampedNote;
+        const { error: uerr } = await supabase.from('targets').update({
+          outreach_date: today,
+          status: newStatus,
+          notes: newNotes.slice(0, 2000),
+        }).eq('id', u.target_id);
+        if (uerr) { recordError(`target update ${u.target_id}`, uerr); continue; }
+        counts.targets = (counts.targets || 0) + 1;
+        log(`  ↻ Target: ${cur[0].promoter} → ${newStatus}`);
+      } catch (e) { recordError(`target_update`, e); }
     }
   }
 
