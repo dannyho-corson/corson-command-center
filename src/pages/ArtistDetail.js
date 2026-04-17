@@ -4,10 +4,10 @@ import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLog';
 import Nav from '../components/Nav';
 
-// Each artist's Google Sheet has the Target List as its 4th tab (consistently
-// named "Target List"). If target_list_url differs from touring_grid_url we
-// trust Danny's explicit override (e.g. a #gid=<num> he set himself). Otherwise
-// we construct a URL that jumps to the Target List tab via ?range=.
+// Each artist's Google Sheet (uploaded from Excel) has four tabs in fixed order:
+// gid=0 → 2026 Grid, gid=1 → 2027 Grid, gid=2 → Festival Calendar, gid=3 → Target List.
+// For Excel-in-Drive files the ?range= param doesn't work, so we jump via #gid=3.
+// If target_list_url differs from touring_grid_url we trust Danny's explicit override.
 function buildTargetListUrl(artist) {
   if (!artist) return null;
   const explicit = artist.target_list_url;
@@ -16,8 +16,7 @@ function buildTargetListUrl(artist) {
   const base = explicit || grid;
   if (!base) return null;
   const withoutHash = base.split('#')[0];
-  const sep = withoutHash.includes('?') ? '&' : '?';
-  return `${withoutHash}${sep}range=Target%20List!A1`;
+  return `${withoutHash}#gid=3`;
 }
 
 // ── RELATIVE TIME ─────────────────────────────────────────────────────────────
