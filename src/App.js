@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import './App.css';
 import ArtistList from './pages/ArtistList';
 import ArtistDetail from './pages/ArtistDetail';
@@ -35,8 +36,13 @@ function shapeUrgentIssue(row, artistNameBySlug) {
     priority: row.priority,
     issue: row.issue,
     createdAt: row.created_at,
+    sortOrder: row.sort_order ?? 0,
+    manuallyPrioritized: row.manually_prioritized === true,
   };
 }
+
+// Maps the three droppable zones used in UrgentIssuesSection to DB priority values.
+const SEVERITY_BY_DROPPABLE = { red: 'High', yellow: 'Medium', green: 'Low' };
 
 // Human-readable "how long ago" for urgent issue timestamps
 function timeAgo(iso) {
@@ -71,17 +77,20 @@ function SeverityBadge({ severity, label }) {
 
 // ── URGENT ISSUES SECTION ─────────────────────────────────────────────────────
 // Renders a prioritized TO-DO list grouped into DO TODAY / THIS WEEK / THIS MONTH.
-// Within each group items are sorted newest-first.
-function UrgentIssuesSection({ items, resolving, onResolve }) {
-  const byCreatedDesc = (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-  const red    = items.filter(i => i.severity === 'red').sort(byCreatedDesc);
-  const yellow = items.filter(i => i.severity === 'yellow').sort(byCreatedDesc);
-  const green  = items.filter(i => i.severity === 'green').sort(byCreatedDesc);
+// Each group is a @hello-pangea/dnd Droppable; each row is a Draggable.
+// Same-group drag → reorder (save sort_order).
+// Cross-group drag → change priority AND sort_order (+ manually_prioritized=true).
+function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd }) {
+  const bySort = (a, b) => (a.sortOrder - b.sortOrder)
+                        || (new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  const red    = items.filter(i => i.severity === 'red').sort(bySort);
+  const yellow = items.filter(i => i.severity === 'yellow').sort(bySort);
+  const green  = items.filter(i => i.severity === 'green').sort(bySort);
 
   const groups = [
-    { key: 'red',    title: 'DO TODAY',       emoji: '🔴', items: red,    accent: 'text-red-400'     },
-    { key: 'yellow', title: 'DO THIS WEEK',   emoji: '🟡', items: yellow, accent: 'text-yellow-400'  },
-    { key: 'green',  title: 'DO THIS MONTH',  emoji: '🟢', items: green,  accent: 'text-emerald-400' },
+    { key: 'red',    title: 'DO TODAY',      emoji: '🔴', items: red,    accent: 'text-red-400'     },
+    { key: 'yellow', title: 'DO THIS WEEK',  emoji: '🟡', items: yellow, accent: 'text-yellow-400'  },
+    { key: 'green',  title: 'DO THIS MONTH', emoji: '🟢', items: green,  accent: 'text-emerald-400' },
   ];
 
   return (
@@ -91,6 +100,7 @@ function UrgentIssuesSection({ items, resolving, onResolve }) {
         {items.length > 0 && (
           <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{items.length}</span>
         )}
+        <span className="text-gray-600 text-xs ml-auto">Drag to re-prioritize</span>
       </div>
 
       {items.length === 0 ? (
@@ -98,32 +108,63 @@ function UrgentIssuesSection({ items, resolving, onResolve }) {
           <p className="text-emerald-400 text-sm font-semibold">All clear — no urgent issues.</p>
         </div>
       ) : (
-        <div className="flex flex-col gap-5">
-          {groups.map(g => g.items.length === 0 ? null : (
-            <div key={g.key} className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-              <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-800 bg-gray-950/60">
-                <span className="text-base leading-none">{g.emoji}</span>
-                <span className={`text-xs font-bold uppercase tracking-widest ${g.accent}`}>{g.title}</span>
-                <span className="text-gray-600 text-xs">· {g.items.length}</span>
-              </div>
-              {g.items.map((item, i) => (
-                <UrgentIssueRow
-                  key={item.id}
-                  item={item}
-                  isLast={i === g.items.length - 1}
-                  resolving={resolving}
-                  onResolve={onResolve}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
+        <DragDropContext onDragEnd={onDragEnd}>
+          <div className="flex flex-col gap-5">
+            {groups.map(g => (
+              <UrgentIssueGroup
+                key={g.key}
+                group={g}
+                resolving={resolving}
+                onResolve={onResolve}
+              />
+            ))}
+          </div>
+        </DragDropContext>
       )}
     </section>
   );
 }
 
-function UrgentIssueRow({ item, isLast, resolving, onResolve }) {
+function UrgentIssueGroup({ group, resolving, onResolve }) {
+  return (
+    <Droppable droppableId={group.key}>
+      {(provided, snapshot) => (
+        <div
+          ref={provided.innerRef}
+          {...provided.droppableProps}
+          className={`bg-gray-900 rounded-xl border overflow-hidden transition-colors ${
+            snapshot.isDraggingOver ? 'border-indigo-500 ring-2 ring-indigo-500/30' : 'border-gray-800'
+          }`}
+        >
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-800 bg-gray-950/60">
+            <span className="text-base leading-none">{group.emoji}</span>
+            <span className={`text-xs font-bold uppercase tracking-widest ${group.accent}`}>{group.title}</span>
+            <span className="text-gray-600 text-xs">· {group.items.length}</span>
+          </div>
+          {group.items.length === 0 ? (
+            <div className="px-5 py-4 text-gray-600 text-xs italic">drop here to set priority to {group.title}</div>
+          ) : group.items.map((item, i) => (
+            <Draggable key={item.id} draggableId={item.id} index={i}>
+              {(dragProvided, dragSnapshot) => (
+                <UrgentIssueRow
+                  item={item}
+                  isLast={i === group.items.length - 1}
+                  resolving={resolving}
+                  onResolve={onResolve}
+                  dragProvided={dragProvided}
+                  dragSnapshot={dragSnapshot}
+                />
+              )}
+            </Draggable>
+          ))}
+          {provided.placeholder}
+        </div>
+      )}
+    </Droppable>
+  );
+}
+
+function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, dragSnapshot }) {
   const rowBg = item.severity === 'red' ? 'bg-red-950/20'
               : item.severity === 'green' ? 'bg-emerald-950/15'
               : 'bg-yellow-950/10';
@@ -135,24 +176,42 @@ function UrgentIssueRow({ item, isLast, resolving, onResolve }) {
     : item.severity === 'green'
       ? 'border-emerald-600 text-emerald-400 hover:bg-emerald-600 hover:text-white'
       : 'border-yellow-600 text-yellow-400 hover:bg-yellow-600 hover:text-white';
+
+  const dragStyle = dragSnapshot?.isDragging
+    ? 'scale-[1.02] shadow-2xl shadow-black/60 ring-1 ring-indigo-500/50'
+    : '';
+
+  // Resolve button — stopPropagation so clicking it doesn't trigger drag
+  const onResolveClick = (e) => { e.stopPropagation(); onResolve(item); };
+
   return (
-    <div className={`flex items-start gap-4 px-5 py-4 ${isLast ? '' : 'border-b border-gray-800'} ${rowBg}`}>
+    <div
+      ref={dragProvided?.innerRef}
+      {...(dragProvided?.draggableProps || {})}
+      {...(dragProvided?.dragHandleProps || {})}
+      style={dragProvided?.draggableProps?.style}
+      className={`flex items-start gap-4 px-5 py-4 ${isLast ? '' : 'border-b border-gray-800'} ${rowBg} transition-transform ${dragStyle} select-none cursor-grab active:cursor-grabbing`}
+    >
       <div className={`w-1 self-stretch rounded-full flex-shrink-0 ${rail}`} />
       <div className="flex flex-col gap-1 flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <SeverityBadge severity={item.severity} label={item.priority || item.label} />
           <Link
             to={`/artists/${item.artistSlug}`}
+            onClick={(e) => e.stopPropagation()}
             className="text-white font-bold text-sm hover:text-indigo-300 transition-colors"
           >
             {item.artist}
           </Link>
+          {item.manuallyPrioritized && (
+            <span title="Manually re-prioritized" className="text-xs" aria-label="Pinned">📌</span>
+          )}
           <span className="text-gray-600 text-xs">· {timeAgo(item.createdAt)}</span>
         </div>
         <p className="text-gray-400 text-sm leading-relaxed">{item.issue}</p>
       </div>
       <button
-        onClick={() => onResolve(item)}
+        onClick={onResolveClick}
         disabled={resolving === item.id}
         className={`flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${btnClass}`}
       >
@@ -522,7 +581,7 @@ function Dashboard() {
           supabase.from('shows').select('artist_slug, fee, deal_type, venue, city, promoter, event_date, notes'),
           supabase.from('pipeline').select('artist_slug, stage, fee_offered, venue, market, buyer, buyer_company, event_date, notes'),
           supabase.from('reminders').select('*').lte('reminder_date', today).eq('completed', false),
-          supabase.from('urgent_issues').select('id, artist_slug, issue, priority, resolved, created_at').eq('resolved', false).order('created_at', { ascending: false }),
+          supabase.from('urgent_issues').select('*').eq('resolved', false),
         ]);
 
         if (artistRes.error) throw artistRes.error;
@@ -569,6 +628,69 @@ function Dashboard() {
     }
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reorder + re-prioritize via drag-and-drop.
+  // - Same droppable → reindex sort_order within that group
+  // - Different droppable → change priority to the droppable's target level,
+  //   reindex both groups, stamp manually_prioritized=true on the moved row.
+  async function handleDragEnd(result) {
+    const { destination, source, draggableId } = result;
+    if (!destination) return;
+    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+
+    const sevBefore = { red: [], yellow: [], green: [] };
+    const bySort = (a, b) => (a.sortOrder - b.sortOrder)
+                          || (new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    for (const it of urgentRows) {
+      const sev = it.priority === 'High' ? 'red' : it.priority === 'Medium' ? 'yellow' : 'green';
+      sevBefore[sev].push({ ...it, severity: sev, sortOrder: it.sort_order ?? 0, createdAt: it.created_at });
+    }
+    Object.keys(sevBefore).forEach(k => sevBefore[k].sort(bySort));
+
+    // Remove from source, insert into destination
+    const movedRaw = sevBefore[source.droppableId].splice(source.index, 1)[0];
+    if (!movedRaw) return;
+    const newPriority = SEVERITY_BY_DROPPABLE[destination.droppableId];
+    const moved = { ...movedRaw, priority: newPriority, severity: destination.droppableId };
+    sevBefore[destination.droppableId].splice(destination.index, 0, moved);
+
+    // Compute DB mutations: reindex both affected groups
+    const affectedKeys = new Set([source.droppableId, destination.droppableId]);
+    const updates = [];
+    for (const key of affectedKeys) {
+      sevBefore[key].forEach((it, idx) => {
+        const isMoved = it.id === draggableId;
+        updates.push({
+          id: it.id,
+          artist_slug: it.artist_slug,
+          issue: it.issue,
+          priority: isMoved ? newPriority : it.priority,
+          sort_order: idx,
+          resolved: false,
+          ...(isMoved ? { manually_prioritized: true } : {}),
+        });
+      });
+    }
+
+    // Optimistic UI update
+    const nextRows = urgentRows.map(r => {
+      const u = updates.find(x => x.id === r.id);
+      if (!u) return r;
+      return { ...r, priority: u.priority, sort_order: u.sort_order, manually_prioritized: u.manually_prioritized === true ? true : r.manually_prioritized };
+    });
+    setUrgentRows(nextRows);
+
+    // Persist. upsert with onConflict:id updates matching rows.
+    const { error } = await supabase
+      .from('urgent_issues')
+      .upsert(updates, { onConflict: 'id' });
+    if (error) {
+      setError(`Drag save failed: ${error.message}`);
+      // Reload canonical state
+      const { data: fresh } = await supabase.from('urgent_issues').select('*').eq('resolved', false);
+      if (fresh) setUrgentRows(fresh);
+    }
+  }
 
   async function handleResolve(issue) {
     setResolving(issue.id);
@@ -689,6 +811,7 @@ function Dashboard() {
           items={urgentIssues}
           resolving={resolving}
           onResolve={handleResolve}
+          onDragEnd={handleDragEnd}
         />
 
 

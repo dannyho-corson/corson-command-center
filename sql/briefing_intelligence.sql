@@ -68,6 +68,15 @@ ALTER TABLE industry_intel ADD COLUMN IF NOT EXISTS event_date     TEXT;
 CREATE INDEX IF NOT EXISTS industry_intel_category_idx ON industry_intel (category);
 CREATE INDEX IF NOT EXISTS industry_intel_priority_idx ON industry_intel (priority);
 
+-- ───────────────────────────────────────────────────────────────────────────
+-- urgent_issues: drag-and-drop TODO ordering
+-- ───────────────────────────────────────────────────────────────────────────
+ALTER TABLE urgent_issues ADD COLUMN IF NOT EXISTS sort_order           INTEGER DEFAULT 0;
+ALTER TABLE urgent_issues ADD COLUMN IF NOT EXISTS manually_prioritized BOOLEAN DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS urgent_issues_priority_sort_idx
+  ON urgent_issues (priority, sort_order);
+
 -- Open RLS policies so the anon key can read + write (command-center runs with anon)
 ALTER TABLE processed_emails ENABLE ROW LEVEL SECURITY;
 ALTER TABLE industry_intel  ENABLE ROW LEVEL SECURITY;
