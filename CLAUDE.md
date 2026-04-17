@@ -24,18 +24,69 @@ Internal dashboard for Corson Agency (talent booking agency) built by Danny Ho. 
 | `targets` | Target promoters/markets per artist — artist_slug, promoter, market, status, priority_order |
 | `urgent_issues` | Flagged issues — artist_slug, issue, priority, resolved |
 
-## Pipeline Stages (in order)
+## The Corson Agency 5-Stage Booking Pipeline
 
-1. **Inquiry** — initial interest / availability request
-2. **Request** — formal request received
-3. **Offer In** — offer submitted to artist or received from buyer
-4. **Negotiating** — fee/terms being discussed
-5. **Confirmed** — deal agreed, pending contract (moves to `shows` table)
-6. **Contracted** — contract signed
-7. **Advanced** — advancing logistics underway
-8. **Settled** — payment settled, deal complete
+Stages 01-02 live in the `pipeline` table (column: `stage`). Stages 03-05 live in the `shows` table (column: `deal_type`).
 
-Stages 1-4 live in the `pipeline` table. Stages 5-8 live in the `shows` table (as `deal_type`).
+### Stage 01 — Inquiry / Request
+Buyer reaches out asking about availability or pitching a show.
+- Could be avail check, general inquiry, or show pitch
+- Respond within 24 hours — no exceptions
+- Qualify the buyer: venue cap, budget range, ticket price, who else on bill, 18+ or 21+?
+- Push all communication to email
+- Check touring grid for availability immediately
+- Check radius clauses
+
+### Stage 02 — Offer In + Negotiating
+Written offer received via email. **THIS IS REAL.**
+- Nothing is real until written offer arrives via email
+- Pre-negotiate if numbers are way off before forwarding to artist
+- Once offer is solid → forward to artist and management **same day**
+- Anchor high — you can come down, never go up
+- Use Spotify stats, festival history, market demand as leverage
+- 50% deposit non-negotiable
+- Follow up every 7 days if no response
+- Radius clauses create scarcity — use them
+
+### Stage 03 — Confirmed
+Both sides agree on terms.
+- Send confirmation email within 24hrs in exact Corson format:
+  - Subject: `CONFIRMED: Artist (MM-DD-YYYY) City, State [Venue]`
+  - CC management + agents
+  - BCC `bookings@corsonagency.com`
+- Send contract immediately after confirmation
+- Issue 50% deposit invoice immediately
+- Collect deposit before any public announcement
+- 72-hour contract return deadline
+
+### Stage 04 — Advancing
+60-90 days out for festivals, 30 days for clubs.
+- Monitor promotion and marketing materials
+- Travel: flights, ground, hotel confirmed
+- Technical: stage plot, input list, backline
+- Hospitality: rider fulfilled, catering, dressing room
+- Financial: deposit confirmed, balance method set
+- Day of show: set time, load in, soundcheck, guest list
+- Management team drives advancing — we keep overall eye
+- Promo: press kit, approved photos, social assets
+
+### Stage 05 — Settled
+Show happened. Money in. Deal closed.
+- Collect remaining balance day of show (usually 50%)
+- ECR issued by Provident Financial
+- Artist approves ECR
+- Direct deposit to artist
+- Deal logged complete in master spreadsheet
+- Buyer relationship note added
+- Post-show debrief captured
+
+### Key rules (apply to all stages)
+- 50% deposit non-negotiable
+- Nothing is real until written offer via email
+- No announcement before deposit cleared
+- Anchor high in negotiation — never go up, only down
+- BCC `bookings@corsonagency.com` on all confirmations
+- Follow up every 7 days on anything in Stage 02
 
 ## Artist Slugs
 

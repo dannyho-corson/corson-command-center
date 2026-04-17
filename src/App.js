@@ -260,7 +260,7 @@ function KpiCard({ kpi }) {
 // HOLD/PENDING       = pipeline entry on that date, or show with deal_type Hold/Pending
 // AVAILABLE          = everyone else
 function bucketArtistsForDate(artists, shows, pipeline, dateStr) {
-  const confirmedStatuses = new Set(['Confirmed', 'Contracted', 'Advanced', 'Settled', 'Advancing']);
+  const confirmedStatuses = new Set(['Confirmed', 'Advancing', 'Settled']);
   const holdStatuses = new Set(['Hold', 'Pending']);
 
   const confirmedBy = new Map(); // slug -> [show, ...]
@@ -600,8 +600,8 @@ function Dashboard() {
         const rosterCount = artists.filter((a) => a.category !== 'priority').length;
         const activeDeals = shows.length + deals.length;
 
-        // Commission: sum fees from Confirmed/Contracted/Advancing shows × 15%
-        const COMMISSIONABLE_STATUSES = new Set(['Confirmed', 'Contracted', 'Advancing', 'Active', 'Advanced']);
+        // Commission: sum fees from Confirmed / Advancing / Settled shows × 15%
+        const COMMISSIONABLE_STATUSES = new Set(['Confirmed', 'Advancing', 'Settled']);
         const commissionableFees = shows.reduce((sum, s) => {
           if (!COMMISSIONABLE_STATUSES.has(s.status)) return sum;
           const n = parseFloat((s.fee || '').replace(/[^0-9.]/g, ''));

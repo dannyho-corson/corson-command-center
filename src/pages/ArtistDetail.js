@@ -99,14 +99,11 @@ function KpiCard({ label, value, sub, accent }) {
 // ── DEAL BADGE ────────────────────────────────────────────────────────────────
 function DealBadge({ type }) {
   const map = {
-    Contracted: 'bg-emerald-900 text-emerald-300 border-emerald-700',
-    Confirmed: 'bg-emerald-900 text-emerald-300 border-emerald-700',
-    Advanced: 'bg-blue-900 text-blue-300 border-blue-700',
-    Settled: 'bg-gray-800 text-gray-400 border-gray-600',
-    Negotiating: 'bg-yellow-900 text-yellow-300 border-yellow-700',
-    'Offer In': 'bg-yellow-900 text-yellow-300 border-yellow-700',
-    Request: 'bg-gray-800 text-gray-400 border-gray-600',
-    Inquiry: 'bg-gray-800 text-gray-400 border-gray-600',
+    'Inquiry / Request':      'bg-indigo-900 text-indigo-300 border-indigo-700',
+    'Offer In + Negotiating': 'bg-yellow-900 text-yellow-300 border-yellow-700',
+    Confirmed:                'bg-emerald-900 text-emerald-300 border-emerald-700',
+    Advancing:                'bg-blue-900 text-blue-300 border-blue-700',
+    Settled:                  'bg-gray-800 text-gray-400 border-gray-600',
   };
   const cls = map[type] || 'bg-gray-800 text-gray-400 border-gray-600';
   return <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${cls}`}>{type}</span>;
@@ -305,11 +302,11 @@ function EditArtistModal({ artist, onClose, onSaved }) {
 }
 
 // ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
-const PIPELINE_STAGES = ['Offer In', 'Negotiating', 'Confirmed'];
+const PIPELINE_STAGES = ['Inquiry / Request', 'Offer In + Negotiating', 'Confirmed', 'Advancing', 'Settled'];
 const DEAL_CATEGORIES = ['Club', 'Festival'];
 
 const EMPTY_DEAL = {
-  stage: 'Offer In', event_date: '', market: '', venue: '',
+  stage: 'Inquiry / Request', event_date: '', market: '', venue: '',
   buyer: '', buyer_company: '', fee_offered: '', fee_target: '',
   deal_type: 'Club', hold_number: '', next_action: '', notes: '',
 };

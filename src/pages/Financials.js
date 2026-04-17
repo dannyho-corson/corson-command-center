@@ -50,17 +50,17 @@ const MONTHLY_DATA = [
   { month: 'January 2026',  gigs: 8,  total: 42500,  status: 'Settled' },
   { month: 'February 2026', gigs: 7,  total: 38750,  status: 'Settled' },
   { month: 'March 2026',    gigs: 9,  total: 55200,  status: 'Settled' },
-  { month: 'April 2026',    gigs: 5,  total: 28900,  status: 'Contracted' },
-  { month: 'May 2026',      gigs: 6,  total: 34200,  status: 'Contracted' },
+  { month: 'April 2026',    gigs: 5,  total: 28900,  status: 'Advancing' },
+  { month: 'May 2026',      gigs: 6,  total: 34200,  status: 'Advancing' },
   { month: 'June 2026',     gigs: 4,  total: 22400,  status: 'Confirmed' },
   { month: 'July 2026',     gigs: 3,  total: 18000,  status: 'Confirmed' },
 ];
 
 const MONTH_STATUS_STYLE = {
-  Settled:    'bg-gray-800 text-gray-400 border-gray-700',
-  Contracted: 'bg-emerald-900 text-emerald-300 border-emerald-700',
-  Confirmed:  'bg-yellow-900 text-yellow-300 border-yellow-700',
-  Projected:  'bg-gray-800 text-gray-500 border-gray-700',
+  Settled:   'bg-gray-800 text-gray-400 border-gray-700',
+  Advancing: 'bg-blue-900 text-blue-300 border-blue-700',
+  Confirmed: 'bg-emerald-900 text-emerald-300 border-emerald-700',
+  Projected: 'bg-gray-800 text-gray-500 border-gray-700',
 };
 
 // ── PAGE ──────────────────────────────────────────────────────────────────────

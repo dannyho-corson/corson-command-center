@@ -290,11 +290,10 @@ function detectArtistSlug(text) {
   return null;
 }
 function detectStage(text) {
-  if (/\bnegotiat/i.test(text)) return 'Negotiating';
-  if (/\boffer\b/i.test(text)) return 'Offer In';
-  if (/\bhold\b/i.test(text)) return 'Hold';
-  if (/\b(avail|inquiry|request)\b/i.test(text)) return 'Inquiry';
-  return 'Inquiry';
+  // Corson 5-stage pipeline — Stage 01/02 live in pipeline table.
+  if (/\b(offer|negotiat|counter)\b/i.test(text)) return 'Offer In + Negotiating';
+  // Avail check, inquiry, request, hold — all pre-offer → Stage 01
+  return 'Inquiry / Request';
 }
 const MONTH_NAMES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12,
   january:1,february:2,march:3,april:4,june:6,july:7,august:8,september:9,october:10,november:11,december:12 };

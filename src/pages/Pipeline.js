@@ -7,14 +7,20 @@ import ConfirmationEmailModal from '../components/ConfirmationEmailModal';
 import OfferForwardEmailModal from '../components/OfferForwardEmailModal';
 
 // ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
-const PIPELINE_STAGES = ['Offer In', 'Negotiating'];
-const SHOW_STAGES     = ['Confirmed', 'Contracted', 'Advanced', 'Settled'];
+// Corson 5-stage pipeline:
+//   Stage 01 — Inquiry / Request          (pipeline table)
+//   Stage 02 — Offer In + Negotiating     (pipeline table)
+//   Stage 03 — Confirmed                  (shows table)
+//   Stage 04 — Advancing                  (shows table)
+//   Stage 05 — Settled                    (shows table)
+const PIPELINE_STAGES = ['Inquiry / Request', 'Offer In + Negotiating'];
+const SHOW_STAGES     = ['Confirmed', 'Advancing', 'Settled'];
 const ALL_STAGES      = [...PIPELINE_STAGES, ...SHOW_STAGES];
 const DEAL_TYPES      = ['Club', 'Festival'];
 
 const EMPTY_DEAL = {
   artist_slug: '',
-  stage: 'Offer In',
+  stage: 'Inquiry / Request',
   event_date: '',
   market: '',
   venue: '',
@@ -228,9 +234,19 @@ function AddDealModal({ artists, onClose, onAdded }) {
 // Maps each kanban column to which stages from pipeline/shows belong there.
 const COLUMNS = [
   {
-    id: 'offer-in',
-    label: 'Offer In',
-    stages: ['Inquiry', 'Request', 'Offer In'],
+    id: 'inquiry',
+    label: 'Inquiry / Request',
+    stages: ['Inquiry / Request'],
+    source: 'pipeline',
+    accent: 'border-indigo-600',
+    headerBg: 'bg-indigo-900/30',
+    headerText: 'text-indigo-300',
+    dot: 'bg-indigo-500',
+  },
+  {
+    id: 'offer',
+    label: 'Offer In + Negotiating',
+    stages: ['Offer In + Negotiating'],
     source: 'pipeline',
     accent: 'border-yellow-600',
     headerBg: 'bg-yellow-900/30',
@@ -238,19 +254,9 @@ const COLUMNS = [
     dot: 'bg-yellow-500',
   },
   {
-    id: 'negotiating',
-    label: 'Negotiating',
-    stages: ['Negotiating'],
-    source: 'pipeline',
-    accent: 'border-orange-500',
-    headerBg: 'bg-orange-900/30',
-    headerText: 'text-orange-300',
-    dot: 'bg-orange-500',
-  },
-  {
     id: 'confirmed',
     label: 'Confirmed',
-    stages: ['Confirmed', 'Contracted'],
+    stages: ['Confirmed'],
     source: 'shows',
     accent: 'border-emerald-600',
     headerBg: 'bg-emerald-900/30',
@@ -260,7 +266,7 @@ const COLUMNS = [
   {
     id: 'advancing',
     label: 'Advancing',
-    stages: ['Advanced'],
+    stages: ['Advancing'],
     source: 'shows',
     accent: 'border-blue-500',
     headerBg: 'bg-blue-900/30',
@@ -353,7 +359,7 @@ function SetReminderModal({ deal, artistName, onClose, onSaved }) {
 }
 
 // ── DEAL DETAIL PANEL ─────────────────────────────────────────────────────────
-const PANEL_STAGES = ['Inquiry', 'Request', 'Offer In', 'Negotiating', 'Confirmed', 'Contracted', 'Advanced', 'Settled'];
+const PANEL_STAGES = ['Inquiry / Request', 'Offer In + Negotiating', 'Confirmed', 'Advancing', 'Settled'];
 
 function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
   const artistName = artistNames[deal.artist_slug] || deal.artist_slug;
@@ -373,7 +379,7 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
   const [showForwardEmail, setShowForwardEmail] = useState(false);
 
   const isConfirmedOrLater = SHOW_STAGES.includes(form.stage);
-  const isOfferIn = form.stage === 'Offer In';
+  const isOfferIn = form.stage === 'Offer In + Negotiating';
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); setSaved(false); }
 

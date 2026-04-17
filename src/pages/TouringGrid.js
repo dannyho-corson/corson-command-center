@@ -31,14 +31,11 @@ function sortKey(isoDate) {
 
 // ── STATUS / BADGE CONFIG ─────────────────────────────────────────────────────
 const STAGE_STYLE = {
-  Confirmed:   { row: 'bg-emerald-950/20 hover:bg-emerald-950/30', badge: 'bg-emerald-900 text-emerald-300 border-emerald-700', dot: 'bg-emerald-500' },
-  Contracted:  { row: 'bg-emerald-950/20 hover:bg-emerald-950/30', badge: 'bg-emerald-900 text-emerald-300 border-emerald-700', dot: 'bg-emerald-500' },
-  Advanced:    { row: 'bg-blue-950/20 hover:bg-blue-950/30',        badge: 'bg-blue-900 text-blue-300 border-blue-700',           dot: 'bg-blue-500' },
-  Settled:     { row: 'hover:bg-gray-800/30',                        badge: 'bg-gray-800 text-gray-400 border-gray-600',           dot: 'bg-gray-500' },
-  Negotiating: { row: 'bg-yellow-950/10 hover:bg-yellow-950/20',    badge: 'bg-yellow-900 text-yellow-300 border-yellow-700',     dot: 'bg-yellow-500' },
-  'Offer In':  { row: 'bg-yellow-950/10 hover:bg-yellow-950/20',    badge: 'bg-yellow-900 text-yellow-300 border-yellow-700',     dot: 'bg-yellow-500' },
-  Request:     { row: 'bg-yellow-950/10 hover:bg-yellow-950/20',    badge: 'bg-yellow-900 text-yellow-300 border-yellow-700',     dot: 'bg-yellow-500' },
-  Inquiry:     { row: 'bg-yellow-950/10 hover:bg-yellow-950/20',    badge: 'bg-yellow-900 text-yellow-300 border-yellow-700',     dot: 'bg-yellow-500' },
+  'Inquiry / Request':      { row: 'bg-indigo-950/10 hover:bg-indigo-950/20', badge: 'bg-indigo-900 text-indigo-300 border-indigo-700', dot: 'bg-indigo-500' },
+  'Offer In + Negotiating': { row: 'bg-yellow-950/10 hover:bg-yellow-950/20', badge: 'bg-yellow-900 text-yellow-300 border-yellow-700', dot: 'bg-yellow-500' },
+  Confirmed:                { row: 'bg-emerald-950/20 hover:bg-emerald-950/30', badge: 'bg-emerald-900 text-emerald-300 border-emerald-700', dot: 'bg-emerald-500' },
+  Advancing:                { row: 'bg-blue-950/20 hover:bg-blue-950/30',    badge: 'bg-blue-900 text-blue-300 border-blue-700',       dot: 'bg-blue-500' },
+  Settled:                  { row: 'hover:bg-gray-800/30',                    badge: 'bg-gray-800 text-gray-400 border-gray-600',       dot: 'bg-gray-500' },
 };
 
 function getStyle(stage) {
@@ -158,8 +155,8 @@ export default function TouringGrid() {
           {!loading && (
             <div className="flex flex-wrap items-center gap-3 text-xs">
               {[
-                { label: 'Confirmed/Contracted', dot: 'bg-emerald-500' },
-                { label: 'Advanced', dot: 'bg-blue-500' },
+                { label: 'Confirmed', dot: 'bg-emerald-500' },
+                { label: 'Advancing', dot: 'bg-blue-500' },
                 { label: 'In Negotiation', dot: 'bg-yellow-500' },
                 { label: 'Settled', dot: 'bg-gray-500' },
               ].map(({ label, dot }) => (
