@@ -14,13 +14,17 @@ import IndustryIntelWidget from './components/IndustryIntelWidget';
 import { supabase } from './lib/supabase';
 
 // Map a Supabase urgent_issues row → the shape the dashboard card expects.
-// Priority → severity + badge label. Artist name comes from the artists map
-// (falls back to the slug uppercased if the artist hasn't loaded yet).
+// Priority → severity + badge label per the Corson TODO rubric:
+//   High   → red    = DO TODAY
+//   Medium → yellow = DO THIS WEEK
+//   Low    → green  = DO THIS MONTH
 function shapeUrgentIssue(row, artistNameBySlug) {
-  const severity = row.priority === 'High' ? 'red' : 'yellow';
-  const label = row.priority === 'High' ? 'URGENT'
-              : row.priority === 'Medium' ? 'FOLLOW UP'
-              : 'NOTE';
+  const severity = row.priority === 'High' ? 'red'
+                 : row.priority === 'Medium' ? 'yellow'
+                 : 'green';
+  const label = row.priority === 'High' ? 'DO TODAY'
+              : row.priority === 'Medium' ? 'DO THIS WEEK'
+              : 'DO THIS MONTH';
   const artist = (artistNameBySlug?.[row.artist_slug] || row.artist_slug || '').toUpperCase();
   return {
     id: row.id,
@@ -28,22 +32,133 @@ function shapeUrgentIssue(row, artistNameBySlug) {
     artist,
     severity,
     label,
+    priority: row.priority,
     issue: row.issue,
+    createdAt: row.created_at,
   };
+}
+
+// Human-readable "how long ago" for urgent issue timestamps
+function timeAgo(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
 }
 
 // ── SEVERITY BADGE ────────────────────────────────────────────────────────────
 function SeverityBadge({ severity, label }) {
   const classes = {
-    red: 'bg-red-600 text-white',
+    red:    'bg-red-600 text-white',
     yellow: 'bg-yellow-600 text-white',
+    green:  'bg-emerald-600 text-white',
   };
   return (
     <span
-      className={`px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ${classes[severity]}`}
+      className={`px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ${classes[severity] || classes.yellow}`}
     >
       {label}
     </span>
+  );
+}
+
+// ── URGENT ISSUES SECTION ─────────────────────────────────────────────────────
+// Renders a prioritized TO-DO list grouped into DO TODAY / THIS WEEK / THIS MONTH.
+// Within each group items are sorted newest-first.
+function UrgentIssuesSection({ items, resolving, onResolve }) {
+  const byCreatedDesc = (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+  const red    = items.filter(i => i.severity === 'red').sort(byCreatedDesc);
+  const yellow = items.filter(i => i.severity === 'yellow').sort(byCreatedDesc);
+  const green  = items.filter(i => i.severity === 'green').sort(byCreatedDesc);
+
+  const groups = [
+    { key: 'red',    title: 'DO TODAY',       emoji: '🔴', items: red,    accent: 'text-red-400'     },
+    { key: 'yellow', title: 'DO THIS WEEK',   emoji: '🟡', items: yellow, accent: 'text-yellow-400'  },
+    { key: 'green',  title: 'DO THIS MONTH',  emoji: '🟢', items: green,  accent: 'text-emerald-400' },
+  ];
+
+  return (
+    <section className="mb-8">
+      <div className="flex items-center gap-2 mb-4">
+        <h3 className="text-lg font-bold text-white">Urgent Issues</h3>
+        {items.length > 0 && (
+          <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{items.length}</span>
+        )}
+      </div>
+
+      {items.length === 0 ? (
+        <div className="bg-gray-900 rounded-xl border border-gray-800 px-5 py-8 text-center">
+          <p className="text-emerald-400 text-sm font-semibold">All clear — no urgent issues.</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-5">
+          {groups.map(g => g.items.length === 0 ? null : (
+            <div key={g.key} className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-800 bg-gray-950/60">
+                <span className="text-base leading-none">{g.emoji}</span>
+                <span className={`text-xs font-bold uppercase tracking-widest ${g.accent}`}>{g.title}</span>
+                <span className="text-gray-600 text-xs">· {g.items.length}</span>
+              </div>
+              {g.items.map((item, i) => (
+                <UrgentIssueRow
+                  key={item.id}
+                  item={item}
+                  isLast={i === g.items.length - 1}
+                  resolving={resolving}
+                  onResolve={onResolve}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function UrgentIssueRow({ item, isLast, resolving, onResolve }) {
+  const rowBg = item.severity === 'red' ? 'bg-red-950/20'
+              : item.severity === 'green' ? 'bg-emerald-950/15'
+              : 'bg-yellow-950/10';
+  const rail = item.severity === 'red' ? 'bg-red-500'
+              : item.severity === 'green' ? 'bg-emerald-500'
+              : 'bg-yellow-500';
+  const btnClass = item.severity === 'red'
+    ? 'border-red-600 text-red-400 hover:bg-red-600 hover:text-white'
+    : item.severity === 'green'
+      ? 'border-emerald-600 text-emerald-400 hover:bg-emerald-600 hover:text-white'
+      : 'border-yellow-600 text-yellow-400 hover:bg-yellow-600 hover:text-white';
+  return (
+    <div className={`flex items-start gap-4 px-5 py-4 ${isLast ? '' : 'border-b border-gray-800'} ${rowBg}`}>
+      <div className={`w-1 self-stretch rounded-full flex-shrink-0 ${rail}`} />
+      <div className="flex flex-col gap-1 flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <SeverityBadge severity={item.severity} label={item.priority || item.label} />
+          <Link
+            to={`/artists/${item.artistSlug}`}
+            className="text-white font-bold text-sm hover:text-indigo-300 transition-colors"
+          >
+            {item.artist}
+          </Link>
+          <span className="text-gray-600 text-xs">· {timeAgo(item.createdAt)}</span>
+        </div>
+        <p className="text-gray-400 text-sm leading-relaxed">{item.issue}</p>
+      </div>
+      <button
+        onClick={() => onResolve(item)}
+        disabled={resolving === item.id}
+        className={`flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${btnClass}`}
+      >
+        {resolving === item.id ? '…' : 'Resolve'}
+      </button>
+    </div>
   );
 }
 
@@ -569,62 +684,13 @@ function Dashboard() {
           </section>
         )}
 
-        {/* ── URGENT ISSUES ── */}
-        <section className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <h3 className="text-lg font-bold text-white">Urgent Issues</h3>
-            {urgentIssues.length > 0 && (
-              <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                {urgentIssues.length}
-              </span>
-            )}
-          </div>
+        {/* ── URGENT ISSUES / TO-DO ── */}
+        <UrgentIssuesSection
+          items={urgentIssues}
+          resolving={resolving}
+          onResolve={handleResolve}
+        />
 
-          <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-            {urgentIssues.length === 0 && (
-              <div className="px-5 py-8 text-center">
-                <p className="text-emerald-400 text-sm font-semibold">All clear — no urgent issues.</p>
-              </div>
-            )}
-            {urgentIssues.map((item, i) => (
-              <div
-                key={i}
-                className={`flex items-start gap-4 px-5 py-4 ${
-                  i < urgentIssues.length - 1 ? 'border-b border-gray-800' : ''
-                } ${item.severity === 'red' ? 'bg-red-950/20' : 'bg-yellow-950/10'}`}
-              >
-                <div
-                  className={`w-1 self-stretch rounded-full flex-shrink-0 ${
-                    item.severity === 'red' ? 'bg-red-500' : 'bg-yellow-500'
-                  }`}
-                />
-                <div className="flex flex-col gap-1 flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <SeverityBadge severity={item.severity} label={item.label} />
-                    <Link
-                      to={`/artists/${item.artistSlug}`}
-                      className="text-white font-bold text-sm hover:text-indigo-300 transition-colors"
-                    >
-                      {item.artist}
-                    </Link>
-                  </div>
-                  <p className="text-gray-400 text-sm leading-relaxed">{item.issue}</p>
-                </div>
-                <button
-                  onClick={() => handleResolve(item)}
-                  disabled={resolving === item.id}
-                  className={`flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                    item.severity === 'red'
-                      ? 'border-red-600 text-red-400 hover:bg-red-600 hover:text-white'
-                      : 'border-yellow-600 text-yellow-400 hover:bg-yellow-600 hover:text-white'
-                  }`}
-                >
-                  {resolving === item.id ? '…' : 'Resolve'}
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
 
         {/* ── QUICK NOTES ── */}
         <section className="mb-8">

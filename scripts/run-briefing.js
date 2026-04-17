@@ -403,15 +403,40 @@ async function runClaudeLayer(env, supabase, newEmails, validSlugs) {
 You MUST return valid JSON matching this exact schema:
 {
   "summary": "2-3 sentence plain-English briefing of what matters today",
-  "urgent": [{"artist_slug": "...", "issue": "...", "why_urgent": "...", "suggested_action": "..."}],
+  "urgent": [{"artist_slug": "...", "issue": "...", "priority": "High|Medium|Low", "why_urgent": "...", "suggested_action": "..."}],
   "draft_replies": [{"to_email": "email@example.com", "subject": "...", "body": "..."}]
 }
 
 Rules:
 - "summary": lead with the single most important thing for Danny today
-- "urgent": only include items NOT already in the urgent_issues list. Maximum 5 items. artist_slug must match a known roster slug.
-- "draft_replies": the 2-3 most actionable emails. Use manager_email from the roster when responding about an artist. Write in Danny's voice (direct, professional, no fluff). Do NOT include "[AI DRAFT]" markers — the script adds that.
+- "urgent": only include items NOT already in the urgent_issues list. Maximum 8 items. artist_slug must match a known roster slug. Assign priority per the rubric below.
+- "draft_replies": the 2-3 most actionable emails (prefer the ones you flagged as High priority). Use manager_email from the roster when responding about an artist. Write in Danny's voice (direct, professional, no fluff). Do NOT include "[AI DRAFT]" markers — the script adds that.
 - Only include artists that are in the provided roster. Return [] for any section with nothing to add.
+
+PRIORITY RUBRIC — assign "priority" for each urgent item using these rules exactly:
+
+"High" (DO TODAY — red) — any of:
+  - Show is within 7 days and something is missing (contract, deposit, advancing info)
+  - Deposit is overdue
+  - Contract deadline has passed
+  - Buyer has been waiting 48+ hours for a response
+  - Competing offers on the same date need resolution today
+  - Radius-clause conflict flagged
+
+"Medium" (DO THIS WEEK — yellow) — any of:
+  - Active negotiation needing follow-up
+  - Offer received, needs forwarding to artist team
+  - Avail check that came in this week
+  - Show is within 30 days and needs advancing started
+  - Payment follow-up needed (not yet overdue)
+
+"Low" (DO THIS MONTH — green) — any of:
+  - Early-stage inquiry
+  - Festival pitch opportunity
+  - Relationship building / outreach
+  - Show is 30+ days out with no immediate blocker
+
+If an item doesn't clearly fit any bucket, default to "Medium".
 
 INDUSTRY CONTEXT:
 ${industryBible || '(not loaded)'}`.slice(0, 60_000);
@@ -638,7 +663,8 @@ function finalize(extra = {}) {
       try {
         if (!validSlugs.has(u.artist_slug)) continue;
         if (await existsUrgent(supabase, u.artist_slug, u.issue)) continue;
-        const row = { artist_slug: u.artist_slug, issue: u.issue, priority: 'High', resolved: false };
+        const priority = ['High', 'Medium', 'Low'].includes(u.priority) ? u.priority : 'Medium';
+        const row = { artist_slug: u.artist_slug, issue: u.issue, priority, resolved: false };
         const { data, error } = await supabase.from('urgent_issues').insert(row).select().single();
         if (error) { recordError(`claude-urgent ${u.artist_slug}`, error); continue; }
         inserted.urgent.push(data); counts.urgent++;
