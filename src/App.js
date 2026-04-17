@@ -528,11 +528,6 @@ function Dashboard() {
           </div>
         </section>
 
-        {/* ── INDUSTRY INTEL ── */}
-        <section className="mb-8">
-          <IndustryIntelWidget />
-        </section>
-
         {/* ── DUE TODAY ── */}
         {dueReminders.filter(r => !dismissedReminders.has(r.id)).length > 0 && (
           <section className="mb-8">
@@ -653,6 +648,11 @@ function Dashboard() {
           pipeline={allPipeline}
           loading={loading}
         />
+
+        {/* ── INDUSTRY INTEL (bottom of dashboard) ── */}
+        <section className="mt-8">
+          <IndustryIntelWidget />
+        </section>
 
         {/* ── FOOTER ── */}
         <footer className="mt-10 pt-6 border-t border-gray-800 text-center">
