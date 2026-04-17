@@ -38,7 +38,7 @@ const SCRAPE_TARGET = 30;
 const SCRAPE_MAX = 60;
 const SCROLL_MAX_ITERS = 20;
 
-const CLAUDE_MODEL = 'claude-sonnet-4-6';
+const CLAUDE_MODEL = 'claude-opus-4-7';
 
 const TIMEOUT_HANDLE = setTimeout(() => {
   finalize({ status: 'TIMEOUT', reason: '8-minute timeout exceeded' });
