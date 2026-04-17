@@ -13,27 +13,23 @@ import Nav from './components/Nav';
 import IndustryIntelWidget from './components/IndustryIntelWidget';
 import { supabase } from './lib/supabase';
 
-// ── URGENT ISSUES SEED DATA ───────────────────────────────────────────────────
-// Source of truth. Resolved state is persisted to Supabase (urgent_issues table)
-// if the table exists; otherwise falls back to localStorage.
-// Run sql/migrations.sql in the Supabase SQL editor to enable DB persistence.
-const SEED_ISSUES = [
-  { id: 'ui-1', severity: 'red',    label: 'CONFLICT',   artist: 'CLAWZ',     artistSlug: 'clawz',     issue: 'Buyer pushing LA show June 12 — VIOLATES EDC LV radius clause (active until Aug 15). Reject immediately.' },
-  { id: 'ui-2', severity: 'red',    label: 'OVERDUE',    artist: 'SHOGUN',    artistSlug: 'shogun',    issue: 'Domicile Miami contract unsigned — 72-hr deadline passed 2 days ago. Chase buyer now.' },
-  { id: 'ui-3', severity: 'yellow', label: 'FOLLOW UP',  artist: 'MAD DOG',   artistSlug: 'mad-dog',   issue: 'NYC offer at $3,500 — below floor of $4,000. Counter or decline pending artist approval.' },
-  { id: 'ui-4', severity: 'yellow', label: 'FOLLOW UP',  artist: 'JUNKIE KID',artistSlug: 'junkie-kid',issue: 'Tomorrowland routing — need HGR details from VEOP by EOD for festival advance.' },
-  { id: 'ui-5', severity: 'yellow', label: 'ACTION',     artist: 'DRAKK',     artistSlug: 'drakk',     issue: 'Buyer communicated offer via WhatsApp only. Push to email — nothing is real until written offer received.' },
-];
-
-const LS_KEY = 'ccc_resolved_issues';
-
-function loadResolvedFromLS() {
-  try { return new Set(JSON.parse(localStorage.getItem(LS_KEY) || '[]')); }
-  catch { return new Set(); }
-}
-
-function saveResolvedToLS(set) {
-  localStorage.setItem(LS_KEY, JSON.stringify([...set]));
+// Map a Supabase urgent_issues row → the shape the dashboard card expects.
+// Priority → severity + badge label. Artist name comes from the artists map
+// (falls back to the slug uppercased if the artist hasn't loaded yet).
+function shapeUrgentIssue(row, artistNameBySlug) {
+  const severity = row.priority === 'High' ? 'red' : 'yellow';
+  const label = row.priority === 'High' ? 'URGENT'
+              : row.priority === 'Medium' ? 'FOLLOW UP'
+              : 'NOTE';
+  const artist = (artistNameBySlug?.[row.artist_slug] || row.artist_slug || '').toUpperCase();
+  return {
+    id: row.id,
+    artistSlug: row.artist_slug,
+    artist,
+    severity,
+    label,
+    issue: row.issue,
+  };
 }
 
 // ── SEVERITY BADGE ────────────────────────────────────────────────────────────
@@ -372,9 +368,9 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Resolved issues — persisted to Supabase if table exists, else localStorage
-  const [resolvedIds, setResolvedIds] = useState(() => loadResolvedFromLS());
-  const [resolving, setResolving] = useState(null); // id being resolved
+  // Urgent issues — loaded from Supabase where resolved=false. Source of truth.
+  const [urgentRows, setUrgentRows] = useState([]);
+  const [resolving, setResolving] = useState(null); // id currently being resolved
 
   // Due Today reminders
   const [dueReminders, setDueReminders] = useState([]);
@@ -392,23 +388,33 @@ function Dashboard() {
     setNotesSaved(true);
   }
 
-  const urgentIssues = SEED_ISSUES.filter((i) => !resolvedIds.has(i.id));
+  const artistNameBySlug = useMemo(() => {
+    const m = {};
+    rosterArtists.forEach(a => { if (a.slug) m[a.slug] = a.name; });
+    return m;
+  }, [rosterArtists]);
+  const urgentIssues = useMemo(
+    () => urgentRows.map(r => shapeUrgentIssue(r, artistNameBySlug)),
+    [urgentRows, artistNameBySlug]
+  );
 
   useEffect(() => {
     async function load() {
       try {
         const today = new Date().toISOString().split('T')[0];
-        const [artistRes, showsRes, pipelineRes, remindersRes] = await Promise.all([
+        const [artistRes, showsRes, pipelineRes, remindersRes, urgentRes] = await Promise.all([
           supabase.from('artists').select('id, name, slug, category'),
           supabase.from('shows').select('artist_slug, fee, deal_type, venue, city, promoter, event_date, notes'),
           supabase.from('pipeline').select('artist_slug, stage, fee_offered, venue, market, buyer, buyer_company, event_date, notes'),
           supabase.from('reminders').select('*').lte('reminder_date', today).eq('completed', false),
+          supabase.from('urgent_issues').select('id, artist_slug, issue, priority, resolved, created_at').eq('resolved', false).order('created_at', { ascending: false }),
         ]);
 
         if (artistRes.error) throw artistRes.error;
         if (showsRes.error) throw showsRes.error;
         if (pipelineRes.error) throw pipelineRes.error;
         if (!remindersRes.error) setDueReminders(remindersRes.data || []);
+        if (!urgentRes.error) setUrgentRows(urgentRes.data || []);
 
         const artists = artistRes.data;
         const shows = showsRes.data;
@@ -451,21 +457,17 @@ function Dashboard() {
 
   async function handleResolve(issue) {
     setResolving(issue.id);
-    // Optimistic update
-    const next = new Set(resolvedIds);
-    next.add(issue.id);
-    setResolvedIds(next);
-    saveResolvedToLS(next);
-
-    // Try Supabase (works once sql/migrations.sql has been run)
-    try {
-      await supabase
-        .from('urgent_issues')
-        .update({ resolved: true })
-        .eq('artist_slug', issue.artistSlug)
-        .eq('label', issue.label);
-    } catch {
-      // Table may not exist yet — localStorage already saved it
+    // Optimistic remove — the row disappears from the card immediately
+    const before = urgentRows;
+    setUrgentRows(prev => prev.filter(r => r.id !== issue.id));
+    const { error } = await supabase
+      .from('urgent_issues')
+      .update({ resolved: true })
+      .eq('id', issue.id);
+    if (error) {
+      // Revert on failure so Danny sees it's not gone
+      setUrgentRows(before);
+      setError(`Could not resolve issue: ${error.message}`);
     }
     setResolving(null);
   }
