@@ -4,6 +4,22 @@ import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLog';
 import Nav from '../components/Nav';
 
+// Each artist's Google Sheet has the Target List as its 4th tab (consistently
+// named "Target List"). If target_list_url differs from touring_grid_url we
+// trust Danny's explicit override (e.g. a #gid=<num> he set himself). Otherwise
+// we construct a URL that jumps to the Target List tab via ?range=.
+function buildTargetListUrl(artist) {
+  if (!artist) return null;
+  const explicit = artist.target_list_url;
+  const grid = artist.touring_grid_url;
+  if (explicit && explicit !== grid) return explicit;
+  const base = explicit || grid;
+  if (!base) return null;
+  const withoutHash = base.split('#')[0];
+  const sep = withoutHash.includes('?') ? '&' : '?';
+  return `${withoutHash}${sep}range=Target%20List!A1`;
+}
+
 // ── RELATIVE TIME ─────────────────────────────────────────────────────────────
 function relativeTime(ts) {
   const diff = Date.now() - new Date(ts).getTime();
@@ -1066,9 +1082,9 @@ export default function ArtistDetail() {
                       Touring Grid
                     </span>
                   )}
-                  {artist.target_list_url ? (
+                  {buildTargetListUrl(artist) ? (
                     <a
-                      href={artist.target_list_url}
+                      href={buildTargetListUrl(artist)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-white transition-colors"
