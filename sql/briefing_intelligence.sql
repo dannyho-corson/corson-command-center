@@ -77,6 +77,11 @@ ALTER TABLE urgent_issues ADD COLUMN IF NOT EXISTS manually_prioritized BOOLEAN 
 CREATE INDEX IF NOT EXISTS urgent_issues_priority_sort_idx
   ON urgent_issues (priority, sort_order);
 
+-- ───────────────────────────────────────────────────────────────────────────
+-- buyers: last_contact column for Rolodex freshness tracking
+-- ───────────────────────────────────────────────────────────────────────────
+ALTER TABLE buyers ADD COLUMN IF NOT EXISTS last_contact DATE;
+
 -- Open RLS policies so the anon key can read + write (command-center runs with anon)
 ALTER TABLE processed_emails ENABLE ROW LEVEL SECURITY;
 ALTER TABLE industry_intel  ENABLE ROW LEVEL SECURITY;

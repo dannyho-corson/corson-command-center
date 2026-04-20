@@ -441,12 +441,12 @@ PRIORITY RUBRIC — assign "priority" for each urgent item using these rules exa
 
 If an item doesn't clearly fit any bucket, default to "Medium".
 
-NEW BUYERS — extract from today's emails any sender who looks like a promoter/buyer and is NOT already in the provided existing_buyers list. For each:
-  - name: human name (e.g. "Jane Smith")
+NEW BUYERS — extract from today's emails any sender who looks like a promoter/buyer AND either isn't in the existing_buyers list OR is there but their email address is what triggered this email today. For each:
+  - name: human name (e.g. "Jane Smith"). Null if the sender is a company-only (no person attached)
   - email: full email address (parse from reply-to, signature, or quoted header)
-  - company: promoter/venue/festival name if mentioned ("Insomniac", "Cave Rave", etc.)
-  - market: city/region if mentioned ("Miami, FL", "Denver")
-Return [] if no new promoters visible. Skip internal senders (Corson Agency team, Leo, Danny, the artists themselves, their managers) — those are not buyers.
+  - company: promoter/venue/festival name if mentioned (e.g. "Insomniac", "Cave Rave")
+  - market: ALWAYS format as "City, State" (US) or "City, Country" (non-US). Examples: "Miami, FL", "Las Vegas, NV", "Berlin, Germany", "Mexico City, Mexico". Never bare cities or abbreviations like "SF" or "NYC".
+Return [] if no new promoters visible. Skip internal senders (Corson Agency team, Leo, Danny, the artists themselves, their managers) — those are not buyers. **Include the sender even if they're in existing_buyers** — that entry will trigger a last_contact update on the Node side.
 
 TARGET UPDATES — for each email today, if the sender matches an existing target in the provided targets list (by email OR fuzzy-match on promoter name), return a target_update:
   - target_id: the UUID from the provided targets list
@@ -584,6 +584,7 @@ function finalize(extra = {}) {
   console.log(`Activity logs:          ${counts.activity}`);
   console.log(`Drafts saved:           ${counts.drafts}`);
   console.log(`New buyers (Rolodex):   ${counts.buyers || 0}`);
+  console.log(`Rolodex last_contact:   ${counts.buyerContacts || 0}`);
   console.log(`Target list updates:    ${counts.targets || 0}`);
   console.log(`Skipped:                ${counts.skipped}`);
   console.log(`Grids regenerated:      ${gridsResult?.ok ? 'yes' : (gridsResult ? 'FAILED (' + gridsResult.reason + ')' : 'not run')}`);
@@ -706,22 +707,36 @@ function finalize(extra = {}) {
     }
   }
 
-  // ─── auto-insert new buyers into Rolodex ──────────────────────────────
+  // ─── auto-insert new buyers + bump last_contact on existing buyers ────
   if (intelligence?.new_buyers?.length) {
+    const today = new Date().toISOString().slice(0, 10);
     for (const b of intelligence.new_buyers) {
       if (!b.email) continue;
       const email = String(b.email).trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) continue;
       try {
-        const { data: existing } = await supabase.from('buyers').select('id').ilike('email', email).limit(1);
-        if (existing && existing.length > 0) { skipped.push(`buyer dup: ${email}`); counts.skipped++; continue; }
+        const { data: existing } = await supabase.from('buyers').select('id, last_contact').ilike('email', email).limit(1);
+        if (existing && existing.length > 0) {
+          // Existing buyer emailed us today — bump last_contact
+          const cur = existing[0];
+          if (cur.last_contact !== today) {
+            const { error: uerr } = await supabase.from('buyers').update({ last_contact: today }).eq('id', cur.id);
+            if (!uerr) {
+              counts.buyerContacts = (counts.buyerContacts || 0) + 1;
+              log(`  ↻ Rolodex: last_contact bumped → ${today} for ${b.name || email}`);
+            }
+          }
+          skipped.push(`buyer dup: ${email}`); counts.skipped++;
+          continue;
+        }
         const row = {
           name: b.name || null,
           email,
           company: b.company || null,
           market: b.market || null,
           status: 'Cold',
-          notes: `[auto-imported from email ${new Date().toISOString().slice(0,10)}]`,
+          last_contact: today,
+          notes: `[auto-imported from email ${today}]`,
         };
         const { data, error: ierr } = await supabase.from('buyers').insert(row).select().single();
         if (ierr) { recordError(`buyer insert ${email}`, ierr); continue; }

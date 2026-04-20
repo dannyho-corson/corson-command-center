@@ -18,7 +18,7 @@ const STATUS_STYLE = {
 // ── ADD BUYER MODAL ───────────────────────────────────────────────────────────
 const EMPTY_BUYER = {
   name: '', company: '', market: '', email: '', instagram: '',
-  region: '', status: 'Cold', notes: '', artists_worked: '',
+  region: '', status: 'Cold', notes: '', last_contact: '',
 };
 
 function AddBuyerModal({ onClose, onAdded }) {
@@ -30,10 +30,11 @@ function AddBuyerModal({ onClose, onAdded }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.name) { setErr('Name is required.'); return; }
+    // Either name or company is required — person-less companies are valid
+    if (!form.name && !form.company) { setErr('Name or company is required.'); return; }
     setSaving(true); setErr(null);
     const payload = {
-      name: form.name,
+      name: form.name || null,
       company: form.company || null,
       market: form.market || null,
       email: form.email || null,
@@ -41,7 +42,7 @@ function AddBuyerModal({ onClose, onAdded }) {
       region: form.region || null,
       status: form.status,
       notes: form.notes || null,
-      artists_worked: form.artists_worked || null,
+      last_contact: form.last_contact || null,
     };
     const { data, error } = await supabase.from('buyers').insert(payload).select().single();
     if (error) { setErr(error.message); setSaving(false); return; }
@@ -62,12 +63,10 @@ function AddBuyerModal({ onClose, onAdded }) {
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">
-                Name <span className="text-red-400">*</span>
-              </label>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Name</label>
               <input type="text" value={form.name} onChange={e => set('name', e.target.value)}
                 placeholder="First Last"
-                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" required />
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
             </div>
             <div>
               <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Company</label>
@@ -113,10 +112,9 @@ function AddBuyerModal({ onClose, onAdded }) {
               </select>
             </div>
             <div>
-              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Artists Worked</label>
-              <input type="text" value={form.artists_worked} onChange={e => set('artists_worked', e.target.value)}
-                placeholder="SHOGUN, CLAWZ..."
-                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Last Contact</label>
+              <input type="date" value={form.last_contact} onChange={e => set('last_contact', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500" />
             </div>
           </div>
           <div>
@@ -182,10 +180,43 @@ function StatusSelect({ buyerId, status, onChange }) {
   );
 }
 
-// ── BUYER ROW (expandable) ────────────────────────────────────────────────────
-function BuyerRow({ buyer, onStatusChange }) {
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso + (iso.length === 10 ? 'T00:00:00' : ''));
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// ── BUYER ROW (expandable + inline-editable) ──────────────────────────────────
+function BuyerRow({ buyer, onStatusChange, onBuyerUpdated }) {
   const [expanded, setExpanded] = useState(false);
+  const [form, setForm] = useState({
+    name:         buyer.name || '',
+    company:      buyer.company || '',
+    market:       buyer.market || '',
+    email:        buyer.email || '',
+    instagram:    buyer.instagram || '',
+    notes:        buyer.notes || '',
+    last_contact: buyer.last_contact || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState(null);
   const style = STATUS_STYLE[buyer.status] || STATUS_STYLE['Cold'];
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); setSaved(false); }
+
+  async function saveField(field, value) {
+    if ((buyer[field] || '') === (value || '')) return; // no-op
+    setSaving(true); setErr(null);
+    const patch = { [field]: value || null };
+    const { error } = await supabase.from('buyers').update(patch).eq('id', buyer.id);
+    setSaving(false);
+    if (error) { setErr(error.message); return; }
+    setSaved(true);
+    onBuyerUpdated(buyer.id, patch);
+    setTimeout(() => setSaved(false), 1500);
+  }
 
   return (
     <>
@@ -202,7 +233,7 @@ function BuyerRow({ buyer, onStatusChange }) {
         <td className="px-5 py-3.5">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full flex-shrink-0 ${style.dot}`} />
-            <span className="text-white font-semibold text-sm">{buyer.name}</span>
+            <span className="text-white font-semibold text-sm">{buyer.name || ''}</span>
           </div>
         </td>
         <td className="px-5 py-3.5 text-gray-300 text-sm">{buyer.company || '—'}</td>
@@ -216,43 +247,58 @@ function BuyerRow({ buyer, onStatusChange }) {
         <td className="px-5 py-3.5" onClick={e => e.stopPropagation()}>
           <StatusSelect buyerId={buyer.id} status={buyer.status} onChange={onStatusChange} />
         </td>
-        <td className="px-5 py-3.5 text-gray-500 text-xs max-w-[160px] truncate">{buyer.artists_worked || '—'}</td>
-        <td className="px-5 py-3.5 text-gray-500 text-xs max-w-[200px] truncate">{buyer.notes || '—'}</td>
+        <td className="px-5 py-3.5 text-gray-400 text-xs">{fmtDate(buyer.last_contact)}</td>
+        <td className="px-5 py-3.5 text-gray-500 text-xs max-w-[220px] truncate">{buyer.notes || '—'}</td>
         <td className="px-5 py-3.5 text-gray-600 text-xs">{expanded ? '▲' : '▼'}</td>
       </tr>
       {expanded && (
         <tr className="border-b border-gray-800 bg-gray-800/20">
-          <td colSpan={8} className="px-6 py-4">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs mb-3">
-              {buyer.instagram && (
-                <div>
-                  <p className="text-gray-500 uppercase tracking-wider mb-1">Instagram</p>
-                  <p className="text-indigo-400">{buyer.instagram}</p>
-                </div>
-              )}
-              {buyer.region && (
-                <div>
-                  <p className="text-gray-500 uppercase tracking-wider mb-1">Region</p>
-                  <p className="text-gray-300">{buyer.region}</p>
-                </div>
-              )}
-              {buyer.artists_worked && (
-                <div className="col-span-2">
-                  <p className="text-gray-500 uppercase tracking-wider mb-1">Artists Worked</p>
-                  <p className="text-gray-300">{buyer.artists_worked}</p>
-                </div>
-              )}
-            </div>
-            {buyer.notes && (
-              <div>
-                <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">Notes</p>
-                <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{buyer.notes}</p>
+          <td colSpan={8} className="px-6 py-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-white text-sm font-bold">Edit Buyer</h4>
+              <div className="text-xs text-gray-500">
+                {saving && <span>Saving…</span>}
+                {saved && <span className="text-emerald-400">Saved ✓</span>}
+                {err && <span className="text-red-400">{err}</span>}
               </div>
-            )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+              <Field label="Name (person)" value={form.name} onChange={v => set('name', v)} onBlur={() => saveField('name', form.name)} placeholder="First Last" />
+              <Field label="Company / Venue" value={form.company} onChange={v => set('company', v)} onBlur={() => saveField('company', form.company)} placeholder="e.g. Domicile Miami" />
+              <Field label="Market (City, Country)" value={form.market} onChange={v => set('market', v)} onBlur={() => saveField('market', form.market)} placeholder="e.g. San Francisco, CA" />
+              <Field label="Email" value={form.email} onChange={v => set('email', v)} onBlur={() => saveField('email', form.email)} placeholder="name@example.com" />
+              <Field label="Instagram" value={form.instagram} onChange={v => set('instagram', v)} onBlur={() => saveField('instagram', form.instagram)} placeholder="@handle" />
+              <div>
+                <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Last Contact</label>
+                <input type="date" value={form.last_contact || ''}
+                  onChange={e => set('last_contact', e.target.value)}
+                  onBlur={() => saveField('last_contact', form.last_contact)}
+                  className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Notes</label>
+              <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
+                onBlur={() => saveField('notes', form.notes)}
+                rows={4}
+                placeholder="Context, history, deal preferences, red flags…"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600 resize-y leading-relaxed" />
+            </div>
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+function Field({ label, value, onChange, onBlur, placeholder }) {
+  return (
+    <div>
+      <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">{label}</label>
+      <input type="text" value={value || ''} onChange={e => onChange(e.target.value)} onBlur={onBlur}
+        placeholder={placeholder}
+        className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+    </div>
   );
 }
 
@@ -272,7 +318,7 @@ export default function Rolodex() {
         const { data, error } = await supabase
           .from('buyers')
           .select('*')
-          .order('name');
+          .order('name', { nullsFirst: false });
         if (error) throw error;
         setBuyers(data);
       } catch (err) {
@@ -305,6 +351,10 @@ export default function Rolodex() {
 
   function handleStatusChange(id, newStatus) {
     setBuyers(prev => prev.map(b => b.id === id ? { ...b, status: newStatus } : b));
+  }
+
+  function handleBuyerUpdated(id, patch) {
+    setBuyers(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
   }
 
   const counts = STATUS_OPTIONS.reduce((acc, s) => {
@@ -419,14 +469,19 @@ export default function Rolodex() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-800">
-                  {['Name', 'Company', 'Market', 'Email', 'Status', 'Artists', 'Notes', ''].map(h => (
+                  {['Name', 'Company', 'Market', 'Email', 'Status', 'Last Contact', 'Notes', ''].map(h => (
                     <th key={h} className="text-left text-gray-500 text-xs font-semibold uppercase tracking-wider px-5 py-3">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(buyer => (
-                  <BuyerRow key={buyer.id} buyer={buyer} onStatusChange={handleStatusChange} />
+                  <BuyerRow
+                    key={buyer.id}
+                    buyer={buyer}
+                    onStatusChange={handleStatusChange}
+                    onBuyerUpdated={handleBuyerUpdated}
+                  />
                 ))}
               </tbody>
             </table>
@@ -443,7 +498,7 @@ export default function Rolodex() {
       {showAddModal && (
         <AddBuyerModal
           onClose={() => setShowAddModal(false)}
-          onAdded={buyer => setBuyers(prev => [buyer, ...prev].sort((a, b) => a.name.localeCompare(b.name)))}
+          onAdded={buyer => setBuyers(prev => [buyer, ...prev].sort((a, b) => (a.name || a.company || '').localeCompare(b.name || b.company || '')))}
         />
       )}
     </div>
