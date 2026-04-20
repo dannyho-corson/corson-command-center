@@ -382,7 +382,7 @@ async function runClaudeLayer(env, supabase, newEmails, validSlugs) {
   }
   if (newEmails.length === 0) { log('Claude intelligence layer SKIPPED (no new emails)'); return null; }
 
-  log('Calling Claude Sonnet 4.6 for intelligence layer…');
+  log(`Calling Claude (${CLAUDE_MODEL}) for intelligence layer…`);
 
   const Anthropic = require(path.join(PROJECT, 'node_modules/@anthropic-ai/sdk')).default;
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
@@ -469,7 +469,7 @@ ${industryBible || '(not loaded)'}`.slice(0, 60_000);
   try {
     const response = await client.messages.create({
       model: CLAUDE_MODEL,
-      max_tokens: 4096,
+      max_tokens: 12000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     });
