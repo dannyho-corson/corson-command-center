@@ -822,81 +822,94 @@ export default function ArtistDetail() {
   const [syncMsg, setSyncMsg] = useState(null);
 
   // ── SYNC FROM SHEET ──────────────────────────────────────────────────────────
+  // Pulls the artist's Google Sheet via the gviz/tq public JSON endpoint
+  // and INSERTS only rows not already in Supabase (artist_slug + event_date).
+  // Filters match scripts/import-touring-grids.js so the behavior is
+  // consistent across the import path and the manual sync escape-valve.
+  //
+  // Prereq: the Google Sheet (or Excel-in-Drive file) must be shared as
+  // "Anyone with link can view" — gviz only returns data for public sheets.
   async function handleSyncFromSheet() {
     if (!artist?.touring_grid_url) return;
     setSyncing(true);
     setSyncMsg(null);
     try {
-      // Extract Google Sheet ID from URL
       const m = artist.touring_grid_url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if (!m) throw new Error('Invalid Google Sheet URL');
       const sheetId = m[1];
 
-      // Fetch sheet data as CSV via public export (sheet must be viewable by link)
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
-      const res = await fetch(csvUrl);
+      const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
+      const res = await fetch(gvizUrl);
       if (!res.ok) throw new Error(`Sheet fetch failed (${res.status}) — is the sheet shared as "Anyone with link"?`);
-
       const text = await res.text();
-      // Google wraps the JSON in a callback: google.visualization.Query.setResponse({...})
       const jsonStr = text.replace(/^[^(]*\(/, '').replace(/\);?\s*$/, '');
       const gData = JSON.parse(jsonStr);
       const rows = gData?.table?.rows || [];
 
-      // Find column indices by header text (row 0 or 1 typically has headers)
-      // We look for: DATE, CITY, VENUE, PROMOTER, FEE, DEAL TYPE, STATUS, HOLD, NOTES
+      // Corson sheets have a banner at row 0-1 and real headers around row 2-3.
+      // Find the first row containing DATE + CITY/VENUE tokens.
       let headerRow = -1;
-      for (let i = 0; i < Math.min(rows.length, 5); i++) {
+      for (let i = 0; i < Math.min(rows.length, 6); i++) {
         const vals = (rows[i]?.c || []).map(c => (c?.v || '').toString().toUpperCase());
         if (vals.some(v => v.includes('DATE')) && vals.some(v => v.includes('CITY') || v.includes('VENUE'))) {
-          headerRow = i;
-          break;
+          headerRow = i; break;
         }
       }
-      if (headerRow === -1) throw new Error('Could not find header row in sheet (looking for DATE + CITY/VENUE columns)');
+      if (headerRow === -1) throw new Error('Could not find header row (looking for DATE + CITY/VENUE).');
 
       const headers = (rows[headerRow]?.c || []).map(c => (c?.v || '').toString().toUpperCase().trim());
       const idx = (name) => headers.findIndex(h => h.includes(name));
       const ci = {
         date: idx('DATE'), city: idx('CITY'), venue: idx('VENUE'),
-        promoter: idx('PROMOTER'), fee: idx('FEE'), dealType: idx('DEAL TYPE') !== -1 ? idx('DEAL TYPE') : idx('DEAL'),
+        promoter: idx('PROMOTER'), fee: idx('FEE'),
+        dealType: idx('DEAL TYPE') !== -1 ? idx('DEAL TYPE') : idx('DEAL'),
         status: idx('STATUS'), hold: idx('HOLD'), notes: idx('NOTES'),
       };
 
-      // Parse data rows
-      const showRows = [];
-      for (let i = headerRow + 1; i < rows.length; i++) {
-        const cells = rows[i]?.c || [];
-        const getVal = (colIdx) => {
-          if (colIdx < 0 || !cells[colIdx]) return null;
-          const c = cells[colIdx];
-          // Google Sheets dates come as "Date(yyyy,m,d)"
-          if (c.v && typeof c.v === 'string' && c.v.startsWith('Date(')) {
-            const dm = c.v.match(/Date\((\d+),(\d+),(\d+)\)/);
-            if (dm) {
-              const y = dm[1], mo = String(Number(dm[2]) + 1).padStart(2, '0'), dd = dm[3].padStart(2, '0');
-              return `${y}-${mo}-${dd}`;
-            }
-          }
-          return c.f || c.v || null;
-        };
+      // Same filters as scripts/import-touring-grids.js — keeps the two
+      // paths consistent so a sheet sync won't create ghost festival rows.
+      const ACCEPT_STATUS = new Set(['Confirmed', 'Contracted', 'Settled', 'Advanced', 'Advancing', 'Active']);
+      const SKIP_NOTES_RE = /\b(travel|fill|studio|visa|block|n\/?a)\b/i;
 
-        const dateVal = getVal(ci.date);
-        const city = getVal(ci.city);
-        const venue = getVal(ci.venue);
-        if (!city && !venue) continue; // skip empty rows
-
-        // Parse date to ISO
-        let eventDate = null;
-        if (dateVal) {
-          if (/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
-            eventDate = dateVal;
-          } else {
-            const d = new Date(dateVal);
-            if (!isNaN(d.getTime())) eventDate = d.toISOString().split('T')[0];
+      const getVal = (cells, colIdx) => {
+        if (colIdx < 0 || !cells[colIdx]) return null;
+        const c = cells[colIdx];
+        if (c.v && typeof c.v === 'string' && c.v.startsWith('Date(')) {
+          const dm = c.v.match(/Date\((\d+),(\d+),(\d+)\)/);
+          if (dm) {
+            const y = dm[1], mo = String(Number(dm[2]) + 1).padStart(2, '0'), dd = dm[3].padStart(2, '0');
+            return `${y}-${mo}-${dd}`;
           }
         }
-        if (!eventDate) continue; // skip if no valid date
+        return c.f || c.v || null;
+      };
+      const toISODate = (dateVal) => {
+        if (!dateVal) return null;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) return dateVal;
+        // "Jan 15" style — assume the current sheet year
+        const m2 = String(dateVal).match(/^([A-Za-z]{3,9})\s+(\d{1,2})$/);
+        if (m2) {
+          const MONTHS = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12 };
+          const mon = MONTHS[m2[1].toLowerCase().slice(0, 4)] || MONTHS[m2[1].toLowerCase().slice(0, 3)];
+          if (mon) return `${new Date().getFullYear()}-${String(mon).padStart(2, '0')}-${String(m2[2]).padStart(2, '0')}`;
+        }
+        const d = new Date(dateVal);
+        return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+      };
+
+      const showRows = [];
+      let filteredStatus = 0, filteredNotes = 0;
+      for (let i = headerRow + 1; i < rows.length; i++) {
+        const cells = rows[i]?.c || [];
+        const eventDate = toISODate(getVal(cells, ci.date));
+        const city  = getVal(cells, ci.city);
+        const venue = getVal(cells, ci.venue);
+        const status = (getVal(cells, ci.status) || '').toString().trim();
+        const notes  = (getVal(cells, ci.notes) || '').toString();
+
+        if (!eventDate || (!city && !venue)) continue;
+        if (SKIP_NOTES_RE.test(notes))  { filteredNotes++; continue; }
+        if (!ACCEPT_STATUS.has(status)) { filteredStatus++; continue; }
 
         showRows.push({
           artist_slug: slug,
@@ -904,55 +917,38 @@ export default function ArtistDetail() {
           event_date: eventDate,
           city: city || null,
           venue: venue || null,
-          promoter: getVal(ci.promoter) || null,
-          fee: getVal(ci.fee) || null,
-          deal_type: getVal(ci.dealType) || null,
-          status: getVal(ci.status) || 'Confirmed',
-          hold_number: getVal(ci.hold) || null,
-          notes: getVal(ci.notes) || null,
+          promoter: getVal(cells, ci.promoter) || null,
+          fee: getVal(cells, ci.fee) || null,
+          deal_type: 'Confirmed',
+          status: status || 'Confirmed',
+          hold_number: getVal(cells, ci.hold) || null,
+          notes: notes || null,
         });
       }
 
-      if (showRows.length === 0) {
-        setSyncMsg({ ok: false, text: 'No show data found in sheet.' });
-        setSyncing(false);
+      // Load existing dates in one query to dedup (insert-only per spec)
+      const { data: existing } = await supabase
+        .from('shows').select('event_date').eq('artist_slug', slug);
+      const have = new Set((existing || []).map(r => r.event_date));
+      const newRows = showRows.filter(r => !have.has(r.event_date));
+
+      if (newRows.length === 0) {
+        setSyncMsg({ ok: true, text: 'Already up to date' });
+        await logActivity(slug, 'sheet_synced', `Sync: already up to date (${showRows.length} eligible rows, ${filteredStatus} non-confirmed, ${filteredNotes} notes-skipped, 0 new).`);
         return;
       }
 
-      // Upsert: for each row, check if artist_slug+event_date exists
-      let inserted = 0, updated = 0, skipped = 0;
-      for (const row of showRows) {
-        const { data: existing } = await supabase
-          .from('shows')
-          .select('id')
-          .eq('artist_slug', row.artist_slug)
-          .eq('event_date', row.event_date)
-          .limit(1);
+      const { data: inserted, error } = await supabase.from('shows').insert(newRows).select();
+      if (error) throw error;
+      const insertedCount = inserted?.length ?? newRows.length;
 
-        if (existing && existing.length > 0) {
-          // Update existing — sheet data wins
-          const { error } = await supabase
-            .from('shows')
-            .update({
-              city: row.city, venue: row.venue, promoter: row.promoter,
-              fee: row.fee, deal_type: row.deal_type, status: row.status,
-              hold_number: row.hold_number, notes: row.notes,
-            })
-            .eq('id', existing[0].id);
-          if (error) { skipped++; } else { updated++; }
-        } else {
-          const { error } = await supabase.from('shows').insert(row);
-          if (error) { skipped++; } else { inserted++; }
-        }
-      }
-
-      // Refresh shows list
+      // Refresh
       const { data: refreshed } = await supabase
         .from('shows').select('*').eq('artist_slug', slug).order('event_date');
       if (refreshed) setShows(refreshed);
 
-      await logActivity(slug, 'sheet_synced', `Synced ${showRows.length} rows from Google Sheet (${inserted} new, ${updated} updated, ${skipped} skipped)`);
-      setSyncMsg({ ok: true, text: `Synced! ${inserted} new, ${updated} updated${skipped ? `, ${skipped} skipped` : ''}` });
+      await logActivity(slug, 'sheet_synced', `Synced ${insertedCount} new shows from Google Sheet (${filteredStatus} non-confirmed, ${filteredNotes} notes-skipped filtered).`);
+      setSyncMsg({ ok: true, text: `Synced ${insertedCount} new show${insertedCount === 1 ? '' : 's'} from Google Sheet` });
     } catch (err) {
       setSyncMsg({ ok: false, text: err.message });
     } finally {
