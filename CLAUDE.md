@@ -2,6 +2,36 @@
 
 Internal dashboard for Corson Agency (talent booking agency) built by Danny Ho. Manages artist rosters, show bookings, deal pipeline, buyer contacts, financials, and touring grids.
 
+## DATA FLOW — CRITICAL ARCHITECTURE
+
+**Read this before building anything.** Every workflow in the system follows the same pipeline:
+
+```
+Email arrives in Outlook
+      ↓
+run-briefing.js reads it via Chrome AppleScript
+      ↓
+Claude Opus 4.7 analyzes and extracts show / pipeline / buyer data
+      ↓
+Data pushed to Supabase  ← SINGLE SOURCE OF TRUTH
+      ↓
+generate-grids.js regenerates ALL Excel touring grids FROM Supabase
+      ↓
+Google Drive Desktop auto-syncs the Excel files to Drive
+      ↓
+App reads from Supabase and displays live data
+```
+
+### Rules
+- **Supabase is ALWAYS the source of truth** — never Excel, never Google Sheets.
+- **Excel files and Google Sheets are OUTPUTS only** — generated FROM Supabase by `scripts/generate-grids.js`.
+- **Never read Excel files for data** — only write to them via the generator. Any manual edit is overwritten on the next briefing run.
+- **Two (and only two) exceptions** to "no reading Excel":
+  1. `scripts/import-touring-grids.js` — one-time seed of historical shows from the legacy Excel grids into `shows`. Run once per artist; subsequent runs dedup on `artist_slug + event_date`.
+  2. The **"Sync from Sheet"** button on an Artist Detail page — used only when a manager has edited the Google Sheet directly outside the system and Danny needs to pull that delta back into Supabase.
+
+If a feature needs data, it queries Supabase. If a feature needs to display data, it queries Supabase. Excel / Drive exist for artists + managers who prefer spreadsheets; they are not part of the loop.
+
 ## Tech Stack
 
 - **Frontend:** React 19 + React Router 7 + Tailwind CSS 3
