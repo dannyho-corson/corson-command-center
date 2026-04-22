@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { supabase } from '../lib/supabase';
 
 // Campaigns section — sits at the top of the Pipeline page above the kanban.
@@ -57,6 +58,9 @@ export default function CampaignsSection({ artistNames }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Client-side sort handles missing sort_order gracefully (fallback to
+      // created_at). We don't .order() server-side so the page still works
+      // before the ALTER TABLE is applied.
       const { data, error } = await supabase.from('campaigns').select('*').order('created_at', { ascending: false });
       if (cancelled) return;
       if (!error) setCampaigns(data || []);
@@ -65,9 +69,41 @@ export default function CampaignsSection({ artistNames }) {
     return () => { cancelled = true; };
   }, []);
 
+  // Campaigns in display order — honors sort_order when set, else newest-first.
+  const orderedCampaigns = useMemo(() => {
+    return campaigns.slice().sort((a, b) => {
+      const ao = a.sort_order ?? Number.POSITIVE_INFINITY;
+      const bo = b.sort_order ?? Number.POSITIVE_INFINITY;
+      if (ao !== bo) return ao - bo;
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    });
+  }, [campaigns]);
+
+  async function handleDragEnd(result) {
+    const { source, destination } = result;
+    if (!destination) return;
+    if (source.index === destination.index) return;
+
+    // Reorder optimistically
+    const prev = campaigns;
+    const next = orderedCampaigns.slice();
+    const [moved] = next.splice(source.index, 1);
+    next.splice(destination.index, 0, moved);
+    const withNewOrder = next.map((c, i) => ({ ...c, sort_order: i }));
+    setCampaigns(withNewOrder);
+
+    // Persist sort_order for each row (bulk upsert on id primary key)
+    const updates = withNewOrder.map(c => ({ id: c.id, sort_order: c.sort_order }));
+    const { error } = await supabase.from('campaigns').upsert(updates, { onConflict: 'id' });
+    if (error) {
+      console.error('campaign drag save failed:', error.message);
+      setCampaigns(prev); // revert on failure
+    }
+  }
+
   const activeCount = useMemo(
-    () => campaigns.filter(c => effectiveStatus(c) === 'Active' || effectiveStatus(c) === 'Stalled').length,
-    [campaigns]
+    () => orderedCampaigns.filter(c => effectiveStatus(c) === 'Active' || effectiveStatus(c) === 'Stalled').length,
+    [orderedCampaigns]
   );
 
   async function patchCampaign(id, patch) {
@@ -111,44 +147,74 @@ export default function CampaignsSection({ artistNames }) {
         <span className="text-gray-600 text-xs">· {campaigns.length} total</span>
       </div>
 
-      {/* Collapsed: compact row of cards */}
+      {/* Collapsed: compact row of cards — draggable horizontally to set priority */}
       {collapsed && (
-        <div className="flex gap-3 overflow-x-auto pb-2">
-          {campaigns.map(c => {
-            const st = effectiveStatus(c);
-            const style = STATUS_STYLE[st] || STATUS_STYLE['Not Started'];
-            const win = fmtWindow(c);
-            const statLine = (c.emails_sent || 0) === 0
-              ? 'Not started'
-              : `${c.emails_sent} sent · ${c.replies || 0} replies${c.offers ? ` · ${c.offers} offers` : ''}`;
-            return (
-              <button
-                key={c.id}
-                onClick={() => { setCollapsed(false); setExpandedId(c.id); }}
-                className="flex-shrink-0 min-w-[200px] max-w-[240px] bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-left hover:border-indigo-500/60 transition-colors"
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <Droppable droppableId="campaigns-row" direction="horizontal">
+            {(droppableProvided, dropSnapshot) => (
+              <div
+                ref={droppableProvided.innerRef}
+                {...droppableProvided.droppableProps}
+                className={`flex gap-3 overflow-x-auto pb-2 rounded-lg transition-colors ${
+                  dropSnapshot.isDraggingOver ? 'bg-indigo-950/20' : ''
+                }`}
               >
-                <div className="flex items-center gap-2 mb-1">
-                  <div className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-                  <span className="text-white text-sm font-bold truncate">
-                    {(artistNames?.[c.artist_slug] || c.artist_slug).toUpperCase()}
-                  </span>
-                </div>
-                <div className="text-gray-300 text-xs truncate">{c.name}</div>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${style.badge}`}>{st.toUpperCase()}</span>
-                  {win && <span className="text-gray-500 text-[10px]">{win}</span>}
-                </div>
-                <div className="text-gray-500 text-[11px] mt-1.5 truncate">{statLine}</div>
-              </button>
-            );
-          })}
-        </div>
+                {orderedCampaigns.map((c, idx) => {
+                  const st = effectiveStatus(c);
+                  const style = STATUS_STYLE[st] || STATUS_STYLE['Not Started'];
+                  const win = fmtWindow(c);
+                  const statLine = (c.emails_sent || 0) === 0
+                    ? 'Not started'
+                    : `${c.emails_sent} sent · ${c.replies || 0} replies${c.offers ? ` · ${c.offers} offers` : ''}`;
+                  return (
+                    <Draggable key={c.id} draggableId={String(c.id)} index={idx}>
+                      {(dragProvided, dragSnapshot) => (
+                        <div
+                          ref={dragProvided.innerRef}
+                          {...dragProvided.draggableProps}
+                          {...dragProvided.dragHandleProps}
+                          style={dragProvided.draggableProps.style}
+                          onClick={(e) => {
+                            // Suppress the click if a drag just ended
+                            if (dragSnapshot.isDragging) return;
+                            setCollapsed(false);
+                            setExpandedId(c.id);
+                          }}
+                          className={`flex-shrink-0 min-w-[200px] max-w-[240px] bg-gray-900 border rounded-xl px-4 py-3 text-left transition-all cursor-grab active:cursor-grabbing select-none ${
+                            dragSnapshot.isDragging
+                              ? 'border-indigo-500 scale-[1.04] shadow-2xl shadow-black/60 ring-1 ring-indigo-500/50'
+                              : 'border-gray-800 hover:border-indigo-500/60'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-gray-600 text-[11px] leading-none select-none" title="Drag to reorder">⠿</span>
+                            <div className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                            <span className="text-white text-sm font-bold truncate">
+                              {(artistNames?.[c.artist_slug] || c.artist_slug).toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="text-gray-300 text-xs truncate">{c.name}</div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${style.badge}`}>{st.toUpperCase()}</span>
+                            {win && <span className="text-gray-500 text-[10px]">{win}</span>}
+                          </div>
+                          <div className="text-gray-500 text-[11px] mt-1.5 truncate">{statLine}</div>
+                        </div>
+                      )}
+                    </Draggable>
+                  );
+                })}
+                {droppableProvided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </DragDropContext>
       )}
 
-      {/* Expanded: vertical list of detail panels */}
+      {/* Expanded: vertical list of detail panels — order matches sort_order */}
       {!collapsed && (
         <div className="space-y-3">
-          {campaigns.map(c => (
+          {orderedCampaigns.map(c => (
             <CampaignPanel
               key={c.id}
               campaign={c}

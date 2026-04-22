@@ -116,6 +116,9 @@ CREATE TABLE IF NOT EXISTS campaigns (
 
 CREATE INDEX IF NOT EXISTS campaigns_artist_status_idx ON campaigns (artist_slug, status);
 
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
+CREATE INDEX IF NOT EXISTS campaigns_sort_idx ON campaigns (sort_order);
+
 ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "anon full access campaigns" ON campaigns;
 CREATE POLICY "anon full access campaigns" ON campaigns
