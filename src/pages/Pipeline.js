@@ -7,6 +7,7 @@ import Nav from '../components/Nav';
 import ConfirmationEmailModal from '../components/ConfirmationEmailModal';
 import OfferForwardEmailModal from '../components/OfferForwardEmailModal';
 import CampaignsSection from '../components/CampaignsSection';
+import TodaysFocus from '../components/TodaysFocus';
 
 // ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
 // Corson 5-stage pipeline:
@@ -16,9 +17,17 @@ import CampaignsSection from '../components/CampaignsSection';
 //   Stage 04 — Advancing                  (shows table)
 //   Stage 05 — Settled                    (shows table)
 const PIPELINE_STAGES = ['Inquiry / Request', 'Offer In + Negotiating'];
+// Confirmed + Advancing are merged into one kanban column. Dragging a card
+// into that column stamps deal_type='Confirmed'; an artist's manager moves
+// it to "Advancing" via the detail panel when logistics start.
 const SHOW_STAGES     = ['Confirmed', 'Advancing', 'Settled'];
 const ALL_STAGES      = [...PIPELINE_STAGES, ...SHOW_STAGES];
 const DEAL_TYPES      = ['Club', 'Festival'];
+
+// Offer-structure values for the pipeline.deal_type column (semantic clash
+// with shows.deal_type — shows uses it as the stage name)
+const OFFER_TYPES = ['TBD', 'Landed', 'All In', 'Fee+Flights'];
+const EVENT_TYPES = ['Headline', 'Direct Support', 'Festival Stage', 'B2B', 'Club Night'];
 
 const EMPTY_DEAL = {
   artist_slug: '',
@@ -234,56 +243,55 @@ function AddDealModal({ artists, onClose, onAdded }) {
 
 // ── COLUMN DEFINITIONS ────────────────────────────────────────────────────────
 // Maps each kanban column to which stages from pipeline/shows belong there.
+// Column widths reflect where the real work happens: ~30 / ~30 / ~25 / ~15
 const COLUMNS = [
   {
     id: 'inquiry',
     label: 'Inquiry / Request',
     stages: ['Inquiry / Request'],
+    defaultStageOnDrop: 'Inquiry / Request',
     source: 'pipeline',
     accent: 'border-indigo-600',
     headerBg: 'bg-indigo-900/30',
     headerText: 'text-indigo-300',
     dot: 'bg-indigo-500',
+    flex: 6, // ~30%
   },
   {
     id: 'offer',
     label: 'Offer In + Negotiating',
     stages: ['Offer In + Negotiating'],
+    defaultStageOnDrop: 'Offer In + Negotiating',
     source: 'pipeline',
     accent: 'border-yellow-600',
     headerBg: 'bg-yellow-900/30',
     headerText: 'text-yellow-300',
     dot: 'bg-yellow-500',
+    flex: 6, // ~30%
   },
   {
     id: 'confirmed',
-    label: 'Confirmed',
-    stages: ['Confirmed'],
+    label: 'Confirmed + Advancing',
+    stages: ['Confirmed', 'Advancing'], // merged column
+    defaultStageOnDrop: 'Confirmed',     // drops land as Confirmed; detail panel escalates to Advancing
     source: 'shows',
-    accent: 'border-emerald-600',
-    headerBg: 'bg-emerald-900/30',
-    headerText: 'text-emerald-300',
-    dot: 'bg-emerald-500',
-  },
-  {
-    id: 'advancing',
-    label: 'Advancing',
-    stages: ['Advancing'],
-    source: 'shows',
-    accent: 'border-blue-500',
-    headerBg: 'bg-blue-900/30',
-    headerText: 'text-blue-300',
-    dot: 'bg-blue-500',
+    accent: 'border-teal-500',
+    headerBg: 'bg-teal-900/30',
+    headerText: 'text-teal-300',
+    dot: 'bg-teal-500',
+    flex: 5, // ~25%
   },
   {
     id: 'settled',
     label: 'Settled',
     stages: ['Settled'],
+    defaultStageOnDrop: 'Settled',
     source: 'shows',
     accent: 'border-gray-500',
     headerBg: 'bg-gray-800/50',
     headerText: 'text-gray-400',
     dot: 'bg-gray-500',
+    flex: 3, // ~15%
   },
 ];
 
@@ -398,10 +406,18 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
   const isPipeline = !!deal.stage; // pipeline deals have stage, shows have deal_type
 
   const [form, setForm] = useState({
-    stage:       deal.stage || deal.deal_type || '',
-    fee_offered: deal.fee_offered || deal.fee || '',
-    next_action: deal.next_action || '',
-    notes:       deal.notes || '',
+    stage:           deal.stage || deal.deal_type || '',
+    fee_offered:     deal.fee_offered || deal.fee || '',
+    next_action:     deal.next_action || '',
+    notes:           deal.notes || '',
+    // HGR + deal-structure (pipeline only — columns don't exist on shows)
+    deal_type:       !!deal.stage ? (deal.deal_type || '') : '',
+    event_type:      deal.event_type || '',
+    capacity:        deal.capacity || '',
+    hotel_included:  !!deal.hotel_included,
+    ground_included: !!deal.ground_included,
+    rider_included:  !!deal.rider_included,
+    bonus_structure: deal.bonus_structure || '',
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -420,10 +436,17 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
     let error;
     if (isPipeline) {
       ({ error } = await supabase.from('pipeline').update({
-        stage:       form.stage,
-        fee_offered: form.fee_offered || null,
-        next_action: form.next_action || null,
-        notes:       form.notes || null,
+        stage:           form.stage,
+        fee_offered:     form.fee_offered || null,
+        next_action:     form.next_action || null,
+        notes:           form.notes || null,
+        deal_type:       form.deal_type || null,
+        event_type:      form.event_type || null,
+        capacity:        form.capacity === '' ? null : parseInt(form.capacity, 10) || null,
+        hotel_included:  !!form.hotel_included,
+        ground_included: !!form.ground_included,
+        rider_included:  !!form.rider_included,
+        bonus_structure: form.bonus_structure || null,
       }).eq('id', deal.id));
     } else {
       ({ error } = await supabase.from('shows').update({
@@ -500,13 +523,67 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
               className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
           </div>
           {isPipeline && (
-            <div>
-              <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Next Action</label>
-              <input type="text" value={form.next_action} onChange={e => set('next_action', e.target.value)}
-                placeholder="e.g. Follow up by Thursday"
-                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
-            </div>
+            <>
+              <div>
+                <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Next Action</label>
+                <input type="text" value={form.next_action} onChange={e => set('next_action', e.target.value)}
+                  placeholder="e.g. Follow up by Thursday"
+                  className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Offer Structure</label>
+                  <select value={form.deal_type} onChange={e => set('deal_type', e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+                    <option value="">—</option>
+                    {OFFER_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Event Type</label>
+                  <select value={form.event_type} onChange={e => set('event_type', e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+                    <option value="">—</option>
+                    {EVENT_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Capacity</label>
+                  <input type="number" value={form.capacity} onChange={e => set('capacity', e.target.value)}
+                    placeholder="e.g. 800"
+                    className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+                </div>
+                <div>
+                  <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Bonus Structure</label>
+                  <input type="text" value={form.bonus_structure} onChange={e => set('bonus_structure', e.target.value)}
+                    placeholder="e.g. +$500 at 400 tix"
+                    className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600" />
+                </div>
+              </div>
+
+              <div>
+                <span className="block text-gray-500 text-xs uppercase tracking-wider mb-2">HGR Included</span>
+                <div className="flex items-center gap-4 text-sm text-gray-300">
+                  {[
+                    ['hotel_included',  'Hotel'],
+                    ['ground_included', 'Ground'],
+                    ['rider_included',  'Rider'],
+                  ].map(([k, label]) => (
+                    <label key={k} className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={!!form[k]} onChange={e => set(k, e.target.checked)}
+                        className="accent-emerald-500 h-4 w-4" />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
+
           <div>
             <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Notes</label>
             <textarea value={form.notes} onChange={e => set('notes', e.target.value)}
@@ -587,16 +664,38 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
 }
 
 // ── DEAL CARD ─────────────────────────────────────────────────────────────────
+// Stage-specific body content dispatched from a shared wrapper (Draggable
+// shell, drag handle, artist link, Quick Notes for active stages).
+function daysSince(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
+
+function HGRSummary({ deal }) {
+  const bits = [
+    { label: 'Hotel',  v: deal.hotel_included },
+    { label: 'Ground', v: deal.ground_included },
+    { label: 'Rider',  v: deal.rider_included },
+  ];
+  const anySet = bits.some(b => b.v !== null && b.v !== undefined);
+  if (!anySet) return null;
+  return (
+    <div className="text-[11px] text-gray-400 mt-2">
+      {bits.map(b => (
+        <span key={b.label} className="mr-2">
+          {b.label} <span className={b.v ? 'text-emerald-400' : 'text-gray-600'}>{b.v ? '✅' : '❌'}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function DealCard({ deal, col, artistNames, onCardClick, dragProvided, dragSnapshot }) {
   const artistName = artistNames[deal.artist_slug] || deal.artist_slug;
-  const date = fmtDealDate(deal.event_date);
-  const countdown = countdownLabel(daysUntil(deal.event_date));
-  const city = deal.market || deal.city || '';
-  const venue = deal.venue || '';
-  const buyer = deal.buyer_company || deal.buyer || deal.promoter || '';
-  const fee = deal.fee_offered || deal.fee || '';
-
   const tableName = deal._source || (deal.stage ? 'pipeline' : 'shows');
+  const stage = deal.stage || deal.deal_type;
 
   const [notes, setNotes] = useState(cleanNotes(deal.notes));
   const [saveStatus, setSaveStatus] = useState(null);
@@ -614,9 +713,17 @@ function DealCard({ deal, col, artistNames, onCardClick, dragProvided, dragSnaps
     setTimeout(() => setSaveStatus(null), 1500);
   }
 
+  // Stale indicator: pipeline row with no activity in 7+ days → red border
+  const daysSinceActivity = daysSince(deal.updated_at || deal.created_at);
+  const isWorkingStage = col.id === 'inquiry' || col.id === 'offer';
+  const isStale = isWorkingStage && daysSinceActivity !== null && daysSinceActivity >= 7;
+
   const dragStyle = dragSnapshot?.isDragging
-    ? 'scale-[1.02] shadow-2xl shadow-black/60 ring-1 ring-indigo-500/60 bg-gray-850'
+    ? 'scale-[1.02] shadow-2xl shadow-black/60 ring-1 ring-indigo-500/60'
     : '';
+  const borderClass = isStale
+    ? 'border-red-600/70 ring-1 ring-red-600/40'
+    : 'border-gray-800';
 
   return (
     <div
@@ -624,9 +731,8 @@ function DealCard({ deal, col, artistNames, onCardClick, dragProvided, dragSnaps
       {...(dragProvided?.draggableProps || {})}
       style={dragProvided?.draggableProps?.style}
       onClick={() => onCardClick(deal)}
-      className={`bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-800/40 transition-transform transition-colors cursor-pointer ${dragStyle}`}
+      className={`bg-gray-900 border ${borderClass} rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-800/40 transition-transform transition-colors cursor-pointer ${dragStyle}`}
     >
-      {/* Header row: drag handle + artist name + stage badge */}
       <div className="flex items-start gap-2 mb-2">
         <span
           {...(dragProvided?.dragHandleProps || {})}
@@ -643,42 +749,19 @@ function DealCard({ deal, col, artistNames, onCardClick, dragProvided, dragSnaps
         </Link>
       </div>
 
-      {(deal.stage || deal.deal_type) && (
+      {stage && (
         <span className={`text-xs font-semibold px-1.5 py-0.5 rounded border inline-block mb-3 ${col.headerBg} ${col.headerText} border-current/30`}>
-          {deal.stage || deal.deal_type}
+          {stage}
         </span>
       )}
 
-      {/* Details — labels always shown, values blank (not "—") when missing */}
-      <div className="space-y-1.5 text-xs">
-        <div className="flex items-start gap-2">
-          <span className="text-gray-600 w-14 flex-shrink-0">Date</span>
-          <span className={date === 'Date TBD' ? 'text-gray-600 italic' : 'text-gray-300'}>
-            {date}
-            {countdown && <span className="ml-2 text-gray-500 text-[11px]">· {countdown}</span>}
-          </span>
-        </div>
-        <div className="flex items-start gap-2">
-          <span className="text-gray-600 w-14 flex-shrink-0">City</span>
-          <span className="text-gray-300">{city}</span>
-        </div>
-        <div className="flex items-start gap-2">
-          <span className="text-gray-600 w-14 flex-shrink-0">Venue</span>
-          <span className="text-gray-300 truncate">{venue}</span>
-        </div>
-        <div className="flex items-start gap-2">
-          <span className="text-gray-600 w-14 flex-shrink-0">Buyer</span>
-          <span className="text-gray-300">{buyer}</span>
-        </div>
-      </div>
+      {/* Stage-specific body */}
+      {col.id === 'inquiry'   && <InquiryBody   deal={deal} daysSinceActivity={daysSinceActivity} />}
+      {col.id === 'offer'     && <OfferBody     deal={deal} daysSinceActivity={daysSinceActivity} />}
+      {col.id === 'confirmed' && <ConfirmedBody deal={deal} />}
+      {col.id === 'settled'   && <SettledBody   deal={deal} />}
 
-      {fee && (
-        <div className="mt-3 pt-3 border-t border-gray-800 font-bold text-sm text-emerald-400">
-          {fee}
-        </div>
-      )}
-
-      {/* Quick Notes — cleaned, editable */}
+      {/* Quick Notes — on all cards */}
       <div className="mt-3 pt-3 border-t border-gray-800" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <span className="text-gray-600 text-[10px] uppercase tracking-wider font-semibold">Quick Notes</span>
@@ -700,6 +783,115 @@ function DealCard({ deal, col, artistNames, onCardClick, dragProvided, dragSnaps
   );
 }
 
+function InquiryBody({ deal, daysSinceActivity }) {
+  const city = deal.market || deal.city || '';
+  const date = fmtDealDate(deal.event_date);
+  const buyer = deal.buyer_company || deal.buyer || deal.promoter || '';
+  return (
+    <div className="space-y-1.5 text-xs">
+      {city && <div><span className="text-gray-600 mr-2">City</span><span className="text-gray-300">{city}</span></div>}
+      <div><span className="text-gray-600 mr-2">Req</span>
+        <span className={date === 'Date TBD' ? 'text-gray-600 italic' : 'text-gray-300'}>{date}</span>
+      </div>
+      {deal.event_type && <div><span className="text-gray-600 mr-2">Type</span><span className="text-gray-300">{deal.event_type}</span></div>}
+      {buyer && <div><span className="text-gray-600 mr-2">Buyer</span><span className="text-gray-300">{buyer}</span></div>}
+      {daysSinceActivity !== null && (
+        <div className="text-[11px] text-gray-500 pt-1">{daysSinceActivity}d since inquiry</div>
+      )}
+    </div>
+  );
+}
+
+function OfferBody({ deal, daysSinceActivity }) {
+  const city = deal.market || deal.city || '';
+  const venue = deal.venue || '';
+  const date = fmtDealDate(deal.event_date);
+  const countdown = countdownLabel(daysUntil(deal.event_date));
+  const buyer = deal.buyer_company || deal.buyer || deal.promoter || '';
+  const fee = deal.fee_offered || deal.fee || '';
+  return (
+    <div className="space-y-1.5 text-xs">
+      <div>
+        <span className="text-gray-600 mr-2">Date</span>
+        <span className={date === 'Date TBD' ? 'text-gray-600 italic' : 'text-gray-300'}>{date}</span>
+        {countdown && <span className="ml-2 text-gray-500">· {countdown}</span>}
+      </div>
+      {(city || venue) && (
+        <div>
+          <span className="text-gray-600 mr-2">Where</span>
+          <span className="text-gray-300 truncate">{[city, venue].filter(Boolean).join(' · ')}</span>
+        </div>
+      )}
+      {buyer && <div><span className="text-gray-600 mr-2">Buyer</span><span className="text-gray-300">{buyer}</span></div>}
+      {deal.capacity && <div><span className="text-gray-600 mr-2">Cap</span><span className="text-gray-300">{deal.capacity}</span></div>}
+
+      {fee && (
+        <div className="pt-2 flex items-center gap-2">
+          <span className="text-emerald-400 font-bold text-lg">{fee}</span>
+          {deal.deal_type && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border border-gray-700 text-gray-300">
+              {deal.deal_type}
+            </span>
+          )}
+        </div>
+      )}
+      <HGRSummary deal={deal} />
+      {daysSinceActivity !== null && (
+        <div className="text-[11px] text-gray-500 pt-1">{daysSinceActivity}d since last activity</div>
+      )}
+    </div>
+  );
+}
+
+function ConfirmedBody({ deal }) {
+  const city = deal.market || deal.city || '';
+  const venue = deal.venue || '';
+  const date = fmtDealDate(deal.event_date);
+  const days = daysUntil(deal.event_date);
+  const countdown = countdownLabel(days);
+  const promoter = deal.promoter || deal.buyer_company || deal.buyer || '';
+  const fee = deal.fee || deal.fee_offered || '';
+  const showWeek = days !== null && days >= 0 && days <= 7;
+  const statusLabel = showWeek ? 'Show Week' : (deal.deal_type === 'Advancing' ? 'Advancing' : 'Confirmed');
+  return (
+    <div className="space-y-1.5 text-xs">
+      <div>
+        <span className="text-gray-600 mr-2">Date</span>
+        <span className={date === 'Date TBD' ? 'text-gray-600 italic' : 'text-gray-300'}>{date}</span>
+        {countdown && <span className={`ml-2 ${showWeek ? 'text-red-400 font-semibold' : 'text-gray-500'}`}>· {countdown}</span>}
+      </div>
+      {(city || venue) && (
+        <div>
+          <span className="text-gray-600 mr-2">Where</span>
+          <span className="text-gray-300 truncate">{[city, venue].filter(Boolean).join(' · ')}</span>
+        </div>
+      )}
+      {promoter && <div><span className="text-gray-600 mr-2">Promo</span><span className="text-gray-300 truncate">{promoter}</span></div>}
+      {fee && <div className="text-emerald-400 font-bold pt-1">{fee}</div>}
+      <div className="text-[10px] font-semibold uppercase tracking-wider mt-1">
+        <span className={showWeek ? 'text-red-400' : 'text-teal-300'}>{statusLabel}</span>
+      </div>
+    </div>
+  );
+}
+
+function SettledBody({ deal }) {
+  const city = deal.market || deal.city || '';
+  const venue = deal.venue || '';
+  const date = fmtDealDate(deal.event_date);
+  const fee = deal.fee || deal.fee_offered || '';
+  return (
+    <div className="space-y-1.5 text-xs">
+      <div><span className="text-gray-600 mr-2">Date</span><span className="text-gray-400">{date}</span></div>
+      {(city || venue) && (
+        <div><span className="text-gray-600 mr-2">Where</span><span className="text-gray-400 truncate">{[city, venue].filter(Boolean).join(' · ')}</span></div>
+      )}
+      {fee && <div className="text-gray-300">{fee}</div>}
+      <span className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 mt-1">SETTLED</span>
+    </div>
+  );
+}
+
 // ── KANBAN COLUMN ─────────────────────────────────────────────────────────────
 function KanbanColumn({ col, deals, artistNames, onCardClick }) {
   return (
@@ -708,7 +900,8 @@ function KanbanColumn({ col, deals, artistNames, onCardClick }) {
         <div
           ref={droppableProvided.innerRef}
           {...droppableProvided.droppableProps}
-          className={`flex-1 min-w-[240px] max-w-xs flex flex-col rounded-xl border-t-2 ${col.accent} bg-gray-900/50 transition-colors ${
+          style={{ flex: col.flex || 1 }}
+          className={`min-w-[240px] flex flex-col rounded-xl border-t-2 ${col.accent} bg-gray-900/50 transition-colors ${
             dropSnapshot.isDraggingOver ? 'ring-2 ring-indigo-500/50 bg-gray-900/80' : ''
           }`}
         >
@@ -776,7 +969,7 @@ export default function Pipeline() {
 
     const srcTable = srcCol.source;   // 'pipeline' | 'shows'
     const dstTable = dstCol.source;
-    const newStage = dstCol.stages[0]; // each column has a single target stage
+    const newStage = dstCol.defaultStageOnDrop || dstCol.stages[0];
 
     // Find the moving deal
     const srcList = srcTable === 'pipeline' ? pipelineDeals : shows;
@@ -1008,6 +1201,9 @@ export default function Pipeline() {
 
         {/* ── CAMPAIGNS (above the kanban) ── */}
         <CampaignsSection artistNames={artistNames} />
+
+        {/* ── TODAY'S FOCUS ── */}
+        <TodaysFocus artistNames={artistNames} />
 
         {/* ── KANBAN BOARD ── */}
         {showAddDeal && (

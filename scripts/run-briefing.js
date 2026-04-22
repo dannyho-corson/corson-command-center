@@ -409,7 +409,8 @@ You MUST return valid JSON matching this exact schema:
   "draft_replies": [{"to_email": "email@example.com", "subject": "...", "body": "..."}],
   "new_buyers": [{"name": "...", "email": "...", "company": "...", "market": "..."}],
   "target_updates": [{"target_id": "<uuid>", "new_status": "...", "note": "..."}],
-  "campaign_replies": [{"campaign_id": "<uuid>", "buyer_email": "...", "is_offer": false, "note": "..."}]
+  "campaign_replies": [{"campaign_id": "<uuid>", "buyer_email": "...", "is_offer": false, "note": "..."}],
+  "deal_extractions": [{"artist_slug": "...", "event_date": "YYYY-MM-DD", "deal_type": "Landed|All In|Fee+Flights|TBD", "event_type": "Headline|Direct Support|Festival Stage|B2B|Club Night", "capacity": 800, "hotel_included": true, "ground_included": true, "rider_included": true, "bonus_structure": "+$500 at 400 tix", "fee_offered": "$2,500"}]
 }
 
 Rules:
@@ -456,6 +457,20 @@ TARGET UPDATES — for each email today, if the sender matches an existing targe
   - note: one-line summary of today's interaction (e.g. "4/17 — responded to Boston 6/26 offer")
 Only include a target_update when there IS a matching row in the targets list. Return [] otherwise.
 
+DEAL EXTRACTIONS — for each offer email that mentions an artist from the roster with a specific date, extract offer structure details so the pipeline row is enriched. Look for:
+  - "all in" / "landed" / "fee + flights" / "fee plus flights" → deal_type
+  - "hotel", "accommodation", "lodging" → hotel_included: true
+  - "ground", "ground transport", "airport pickup", "G+R" → ground_included: true
+  - "rider", "tech rider", "hospitality rider" → rider_included: true
+  - "capacity", "cap", venue size numbers → capacity (integer)
+  - "headline", "direct support", "supporting", "festival stage", "b2b" → event_type
+  - "+$X at Y tix", "bonus", "sellout bonus" → bonus_structure
+For each offer email extract:
+  - artist_slug (must match an entry in the roster)
+  - event_date (YYYY-MM-DD — must be a real parseable date, not "TBD")
+  - any of deal_type / event_type / capacity / hotel_included / ground_included / rider_included / bonus_structure / fee_offered that are explicitly stated
+Return [] if no actionable extractions today. Only include explicitly stated fields — omit keys rather than guessing.
+
 CAMPAIGN REPLIES — for each email today that is a reply from a known campaign contact, return a campaign_reply. A reply counts when ALL of these are true:
   - The sender's email address appears in the provided existing_buyers list (by exact email match)
   - The email is about an artist who has an active campaign (in the provided active_campaigns list)
@@ -498,9 +513,10 @@ ${industryBible || '(not loaded)'}`.slice(0, 60_000);
     if (!Array.isArray(parsed.new_buyers)) parsed.new_buyers = [];
     if (!Array.isArray(parsed.target_updates)) parsed.target_updates = [];
     if (!Array.isArray(parsed.campaign_replies)) parsed.campaign_replies = [];
+    if (!Array.isArray(parsed.deal_extractions)) parsed.deal_extractions = [];
     // Validate artist slugs in urgent
     parsed.urgent = parsed.urgent.filter(u => validSlugs.has(u.artist_slug));
-    log(`Claude returned: ${parsed.urgent.length} urgent, ${parsed.draft_replies.length} drafts, ${parsed.new_buyers.length} new buyers, ${parsed.target_updates.length} target updates, ${parsed.campaign_replies.length} campaign replies`);
+    log(`Claude returned: ${parsed.urgent.length} urgent, ${parsed.draft_replies.length} drafts, ${parsed.new_buyers.length} new buyers, ${parsed.target_updates.length} target updates, ${parsed.campaign_replies.length} campaign replies, ${parsed.deal_extractions.length} deal extractions`);
     return parsed;
   } catch (e) {
     recordError('claude', e);
@@ -602,6 +618,7 @@ function finalize(extra = {}) {
   console.log(`Rolodex last_contact:   ${counts.buyerContacts || 0}`);
   console.log(`Target list updates:    ${counts.targets || 0}`);
   console.log(`Campaign replies:       ${counts.campaignReplies || 0}`);
+  console.log(`Pipeline enrichments:   ${counts.enrichments || 0}`);
   console.log(`Skipped:                ${counts.skipped}`);
   console.log(`Grids regenerated:      ${gridsResult?.ok ? 'yes' : (gridsResult ? 'FAILED (' + gridsResult.reason + ')' : 'not run')}`);
   if (intelligence?.summary) {
@@ -785,6 +802,42 @@ function finalize(extra = {}) {
         counts.targets = (counts.targets || 0) + 1;
         log(`  ↻ Target: ${cur[0].promoter} → ${newStatus}`);
       } catch (e) { recordError(`target_update`, e); }
+    }
+  }
+
+  // ─── deal extractions — enrich matching pipeline rows with HGR fields ─
+  if (intelligence?.deal_extractions?.length) {
+    const OFFER_TYPES_OK = new Set(['TBD', 'Landed', 'All In', 'Fee+Flights']);
+    const EVENT_TYPES_OK = new Set(['Headline', 'Direct Support', 'Festival Stage', 'B2B', 'Club Night']);
+    for (const ex of intelligence.deal_extractions) {
+      if (!ex.artist_slug || !ex.event_date) continue;
+      if (!validSlugs.has(ex.artist_slug)) continue;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ex.event_date)) continue;
+      try {
+        const { data: match } = await supabase
+          .from('pipeline')
+          .select('id')
+          .eq('artist_slug', ex.artist_slug)
+          .eq('event_date', ex.event_date)
+          .limit(1);
+        if (!match || match.length === 0) continue; // no pipeline row to enrich
+
+        const patch = {};
+        if (OFFER_TYPES_OK.has(ex.deal_type))   patch.deal_type = ex.deal_type;
+        if (EVENT_TYPES_OK.has(ex.event_type))  patch.event_type = ex.event_type;
+        if (Number.isFinite(ex.capacity))       patch.capacity = Math.floor(ex.capacity);
+        if (ex.hotel_included === true)         patch.hotel_included = true;
+        if (ex.ground_included === true)        patch.ground_included = true;
+        if (ex.rider_included === true)         patch.rider_included = true;
+        if (typeof ex.bonus_structure === 'string' && ex.bonus_structure.trim()) patch.bonus_structure = ex.bonus_structure.slice(0, 200);
+        if (typeof ex.fee_offered === 'string' && ex.fee_offered.trim())         patch.fee_offered = ex.fee_offered.slice(0, 100);
+        if (Object.keys(patch).length === 0) continue;
+
+        const { error: uerr } = await supabase.from('pipeline').update(patch).eq('id', match[0].id);
+        if (uerr) { recordError(`deal enrich ${ex.artist_slug} ${ex.event_date}`, uerr); continue; }
+        counts.enrichments = (counts.enrichments || 0) + 1;
+        log(`  ↑ Enriched pipeline ${ex.artist_slug} ${ex.event_date}: ${Object.keys(patch).join(', ')}`);
+      } catch (e) { recordError(`deal_extraction`, e); }
     }
   }
 

@@ -119,6 +119,20 @@ CREATE INDEX IF NOT EXISTS campaigns_artist_status_idx ON campaigns (artist_slug
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
 CREATE INDEX IF NOT EXISTS campaigns_sort_idx ON campaigns (sort_order);
 
+-- ───────────────────────────────────────────────────────────────────────────
+-- pipeline: HGR / deal-structure / event-type fields
+-- deal_type here is the OFFER STRUCTURE on pipeline rows ("Landed" /
+-- "All In" / "Fee+Flights" / "TBD") — NOT the stage. (On `shows` the
+-- deal_type column means stage — Confirmed / Advancing / Settled.)
+-- ───────────────────────────────────────────────────────────────────────────
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS deal_type       TEXT;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS hotel_included  BOOLEAN DEFAULT false;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS ground_included BOOLEAN DEFAULT false;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS rider_included  BOOLEAN DEFAULT false;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS bonus_structure TEXT;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS capacity        INTEGER;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS event_type      TEXT;
+
 ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "anon full access campaigns" ON campaigns;
 CREATE POLICY "anon full access campaigns" ON campaigns
