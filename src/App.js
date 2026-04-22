@@ -535,7 +535,6 @@ function AvailabilityBucket({ tone, title, subtitle, rows, compact }) {
 }
 
 function Dashboard() {
-  const [kpis, setKpis] = useState([]);
   const [rosterArtists, setRosterArtists] = useState([]);
   const [allShows, setAllShows] = useState([]);
   const [allPipeline, setAllPipeline] = useState([]);
@@ -572,6 +571,39 @@ function Dashboard() {
     [urgentRows, artistNameBySlug]
   );
 
+  // KPIs derived reactively so they re-compute whenever raw state changes
+  // (e.g. handleResolve removes an item from urgentRows → the Urgent Issues
+  // KPI decrements immediately, no page reload needed).
+  const kpis = useMemo(() => {
+    const totalArtists   = rosterArtists.length;
+    const priorityCount  = rosterArtists.filter(a => a.category === 'priority').length;
+    const rosterCount    = rosterArtists.filter(a => a.category !== 'priority').length;
+
+    // Active = pipeline rows in {Inquiry / Request, Offer In + Negotiating}
+    //        + shows in {Confirmed, Advancing}. Explicitly NOT Settled.
+    const ACTIVE_PIPELINE_STAGES = new Set(['Inquiry / Request', 'Offer In + Negotiating']);
+    const ACTIVE_SHOW_STAGES     = new Set(['Confirmed', 'Advancing']);
+    const pipelineActive = allPipeline.filter(d => ACTIVE_PIPELINE_STAGES.has(d.stage)).length;
+    const showsActive    = allShows.filter(s => ACTIVE_SHOW_STAGES.has(s.deal_type || s.status)).length;
+    const activeDeals    = pipelineActive + showsActive;
+
+    // Commission — 15% of Confirmed / Advancing / Settled show fees
+    const COMMISSIONABLE_STATUSES = new Set(['Confirmed', 'Advancing', 'Settled']);
+    const commissionableFees = allShows.reduce((sum, s) => {
+      if (!COMMISSIONABLE_STATUSES.has(s.deal_type || s.status)) return sum;
+      const n = parseFloat((s.fee || '').replace(/[^0-9.]/g, ''));
+      return sum + (isNaN(n) ? 0 : n);
+    }, 0);
+    const commission = Math.round(commissionableFees * 0.15);
+
+    return [
+      { label: 'Roster Artists', value: String(totalArtists),      sub: `${priorityCount} priority · ${rosterCount} full roster`, icon: '🎧', color: 'indigo' },
+      { label: 'Active Deals',   value: String(activeDeals),       sub: `${pipelineActive} in pipeline · ${showsActive} confirmed+`, icon: '📋', color: 'blue' },
+      { label: 'Urgent Issues',  value: String(urgentRows.length), sub: 'Unresolved — require action', icon: '🚨', color: 'red' },
+      { label: 'YTD Commission', value: `$${commission.toLocaleString()}`, sub: `15% of $${commissionableFees.toLocaleString()} confirmed`, icon: '💰', color: 'green' },
+    ];
+  }, [rosterArtists, allShows, allPipeline, urgentRows]);
+
   useEffect(() => {
     async function load() {
       try {
@@ -594,29 +626,8 @@ function Dashboard() {
         const shows = showsRes.data;
         const deals = pipelineRes.data;
 
-        // ── KPIs ──────────────────────────────────────────────────────────────
-        const totalArtists = artists.length;
-        const priorityCount = artists.filter((a) => a.category === 'priority').length;
-        const rosterCount = artists.filter((a) => a.category !== 'priority').length;
-        const activeDeals = shows.length + deals.length;
-
-        // Commission: sum fees from Confirmed / Advancing / Settled shows × 15%
-        const COMMISSIONABLE_STATUSES = new Set(['Confirmed', 'Advancing', 'Settled']);
-        const commissionableFees = shows.reduce((sum, s) => {
-          if (!COMMISSIONABLE_STATUSES.has(s.status)) return sum;
-          const n = parseFloat((s.fee || '').replace(/[^0-9.]/g, ''));
-          return sum + (isNaN(n) ? 0 : n);
-        }, 0);
-        const commission = Math.round(commissionableFees * 0.15);
-
-        setKpis([
-          { label: 'Roster Artists', value: String(totalArtists), sub: `${priorityCount} priority · ${rosterCount} full roster`, icon: '🎧', color: 'indigo' },
-          { label: 'Active Deals', value: String(activeDeals), sub: 'Across all pipeline stages', icon: '📋', color: 'blue' },
-          { label: 'Urgent Issues', value: String(urgentIssues.length), sub: 'Require action today', icon: '🚨', color: 'red' },
-          { label: 'YTD Commission', value: `$${commission.toLocaleString()}`, sub: `15% of $${commissionableFees.toLocaleString()} confirmed`, icon: '💰', color: 'green' },
-        ]);
-
-        // ── AVAILABILITY WIDGET DATA ─────────────────────────────────────────
+        // Raw data goes to state — KPIs derive reactively via useMemo below
+        // so they update automatically when handleResolve mutates urgentRows.
         setRosterArtists(artists.slice().sort((a, b) => a.name.localeCompare(b.name)));
         setAllShows(shows);
         setAllPipeline(deals);
