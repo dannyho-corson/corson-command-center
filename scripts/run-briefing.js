@@ -387,13 +387,14 @@ async function runClaudeLayer(env, supabase, newEmails, validSlugs) {
   const Anthropic = require(path.join(PROJECT, 'node_modules/@anthropic-ai/sdk')).default;
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
-  // Load current pipeline + urgent issues + existing buyers + targets for context
-  const [{ data: pipelineRows }, { data: urgentRows }, { data: artistRows }, { data: buyerRows }, { data: targetRows }] = await Promise.all([
+  // Load current pipeline + urgent issues + existing buyers + targets + active campaigns for context
+  const [{ data: pipelineRows }, { data: urgentRows }, { data: artistRows }, { data: buyerRows }, { data: targetRows }, { data: campaignRows }] = await Promise.all([
     supabase.from('pipeline').select('artist_slug, stage, venue, market, buyer, buyer_company, fee_offered, event_date, notes').order('event_date', { ascending: true }).limit(200),
     supabase.from('urgent_issues').select('artist_slug, issue, priority').eq('resolved', false).limit(50),
     supabase.from('artists').select('slug, name, manager_email').limit(100),
     supabase.from('buyers').select('name, email, company').limit(500),
     supabase.from('targets').select('id, artist_slug, promoter, contact, status').limit(500),
+    supabase.from('campaigns').select('id, artist_slug, name, market, status, window_start, window_end').in('status', ['Active', 'Not Started']).limit(50),
   ]);
 
   let industryBible = '';
@@ -407,7 +408,8 @@ You MUST return valid JSON matching this exact schema:
   "urgent": [{"artist_slug": "...", "issue": "...", "priority": "High|Medium|Low", "why_urgent": "...", "suggested_action": "..."}],
   "draft_replies": [{"to_email": "email@example.com", "subject": "...", "body": "..."}],
   "new_buyers": [{"name": "...", "email": "...", "company": "...", "market": "..."}],
-  "target_updates": [{"target_id": "<uuid>", "new_status": "...", "note": "..."}]
+  "target_updates": [{"target_id": "<uuid>", "new_status": "...", "note": "..."}],
+  "campaign_replies": [{"campaign_id": "<uuid>", "buyer_email": "...", "is_offer": false, "note": "..."}]
 }
 
 Rules:
@@ -454,6 +456,17 @@ TARGET UPDATES — for each email today, if the sender matches an existing targe
   - note: one-line summary of today's interaction (e.g. "4/17 — responded to Boston 6/26 offer")
 Only include a target_update when there IS a matching row in the targets list. Return [] otherwise.
 
+CAMPAIGN REPLIES — for each email today that is a reply from a known campaign contact, return a campaign_reply. A reply counts when ALL of these are true:
+  - The sender's email address appears in the provided existing_buyers list (by exact email match)
+  - The email is about an artist who has an active campaign (in the provided active_campaigns list)
+  - The email is the buyer responding to Danny's outreach (not an unrelated thread)
+For each matching reply:
+  - campaign_id: UUID of the matching campaign from active_campaigns
+  - buyer_email: the sender's email address (lowercased)
+  - is_offer: true if the reply contains a concrete offer (fee, venue, date), false if just a reply/inquiry
+  - note: one-line summary (e.g. "Fabric London responded with June 13 slot, £2,500 plus HGR")
+Return [] if no campaign replies today.
+
 INDUSTRY CONTEXT:
 ${industryBible || '(not loaded)'}`.slice(0, 60_000);
 
@@ -464,6 +477,7 @@ ${industryBible || '(not loaded)'}`.slice(0, 60_000);
     roster: artistRows || [],
     existing_buyers: (buyerRows || []).map(b => ({ email: b.email, name: b.name, company: b.company })),
     targets: (targetRows || []).map(t => ({ id: t.id, artist_slug: t.artist_slug, promoter: t.promoter, contact: t.contact, status: t.status })),
+    active_campaigns: (campaignRows || []).map(c => ({ id: c.id, artist_slug: c.artist_slug, name: c.name, market: c.market, status: c.status })),
   }, null, 2);
 
   try {
@@ -483,9 +497,10 @@ ${industryBible || '(not loaded)'}`.slice(0, 60_000);
     if (!Array.isArray(parsed.draft_replies)) parsed.draft_replies = [];
     if (!Array.isArray(parsed.new_buyers)) parsed.new_buyers = [];
     if (!Array.isArray(parsed.target_updates)) parsed.target_updates = [];
+    if (!Array.isArray(parsed.campaign_replies)) parsed.campaign_replies = [];
     // Validate artist slugs in urgent
     parsed.urgent = parsed.urgent.filter(u => validSlugs.has(u.artist_slug));
-    log(`Claude returned: ${parsed.urgent.length} urgent, ${parsed.draft_replies.length} drafts, ${parsed.new_buyers.length} new buyers, ${parsed.target_updates.length} target updates`);
+    log(`Claude returned: ${parsed.urgent.length} urgent, ${parsed.draft_replies.length} drafts, ${parsed.new_buyers.length} new buyers, ${parsed.target_updates.length} target updates, ${parsed.campaign_replies.length} campaign replies`);
     return parsed;
   } catch (e) {
     recordError('claude', e);
@@ -586,6 +601,7 @@ function finalize(extra = {}) {
   console.log(`New buyers (Rolodex):   ${counts.buyers || 0}`);
   console.log(`Rolodex last_contact:   ${counts.buyerContacts || 0}`);
   console.log(`Target list updates:    ${counts.targets || 0}`);
+  console.log(`Campaign replies:       ${counts.campaignReplies || 0}`);
   console.log(`Skipped:                ${counts.skipped}`);
   console.log(`Grids regenerated:      ${gridsResult?.ok ? 'yes' : (gridsResult ? 'FAILED (' + gridsResult.reason + ')' : 'not run')}`);
   if (intelligence?.summary) {
@@ -769,6 +785,40 @@ function finalize(extra = {}) {
         counts.targets = (counts.targets || 0) + 1;
         log(`  ↻ Target: ${cur[0].promoter} → ${newStatus}`);
       } catch (e) { recordError(`target_update`, e); }
+    }
+  }
+
+  // ─── campaign replies — bump counters + flag urgent ───────────────────
+  if (intelligence?.campaign_replies?.length) {
+    for (const r of intelligence.campaign_replies) {
+      if (!r.campaign_id) continue;
+      try {
+        const { data: cur } = await supabase.from('campaigns').select('id, artist_slug, name, replies, offers').eq('id', r.campaign_id).limit(1);
+        if (!cur || cur.length === 0) { skipped.push(`campaign missing: ${r.campaign_id}`); counts.skipped++; continue; }
+        const camp = cur[0];
+        const patch = {
+          replies: (camp.replies || 0) + 1,
+          ...(r.is_offer === true ? { offers: (camp.offers || 0) + 1 } : {}),
+          updated_at: new Date().toISOString(),
+        };
+        const { error: uerr } = await supabase.from('campaigns').update(patch).eq('id', camp.id);
+        if (uerr) { recordError(`campaign update ${camp.id}`, uerr); continue; }
+
+        // Flag urgent issue so Danny sees it in the TODO list
+        const buyer = r.buyer_email || '(unknown)';
+        const issue = `Campaign reply: ${buyer} replied to ${camp.artist_slug} / ${camp.name}${r.is_offer ? ' — OFFER' : ''}${r.note ? ' — ' + r.note : ''}`;
+        if (!(await existsUrgent(supabase, camp.artist_slug, issue))) {
+          await supabase.from('urgent_issues').insert({
+            artist_slug: camp.artist_slug,
+            issue: issue.slice(0, 500),
+            priority: r.is_offer ? 'High' : 'Medium',
+            resolved: false,
+          });
+          counts.urgent = (counts.urgent || 0) + 1;
+        }
+        counts.campaignReplies = (counts.campaignReplies || 0) + 1;
+        log(`  ✉ Campaign: ${camp.artist_slug} / ${camp.name} ← ${buyer}${r.is_offer ? ' [OFFER]' : ''}`);
+      } catch (e) { recordError(`campaign_reply`, e); }
     }
   }
 

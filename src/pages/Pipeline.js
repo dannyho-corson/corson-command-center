@@ -6,6 +6,7 @@ import { logActivity } from '../lib/activityLog';
 import Nav from '../components/Nav';
 import ConfirmationEmailModal from '../components/ConfirmationEmailModal';
 import OfferForwardEmailModal from '../components/OfferForwardEmailModal';
+import CampaignsSection from '../components/CampaignsSection';
 
 // ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
 // Corson 5-stage pipeline:
@@ -1004,6 +1005,9 @@ export default function Pipeline() {
             Failed to load pipeline: {error}
           </div>
         )}
+
+        {/* ── CAMPAIGNS (above the kanban) ── */}
+        <CampaignsSection artistNames={artistNames} />
 
         {/* ── KANBAN BOARD ── */}
         {showAddDeal && (

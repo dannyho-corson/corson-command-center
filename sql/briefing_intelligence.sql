@@ -90,6 +90,37 @@ ALTER TABLE shows    ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
 CREATE INDEX IF NOT EXISTS pipeline_stage_sort_idx ON pipeline (stage, sort_order);
 CREATE INDEX IF NOT EXISTS shows_deal_type_sort_idx ON shows (deal_type, sort_order);
 
+-- ───────────────────────────────────────────────────────────────────────────
+-- campaigns: active outreach campaigns per artist — shown at the top of the
+-- Pipeline page. Counters (emails_sent / replies / offers / bounces) are
+-- bumped by the daily briefing when Claude detects a known campaign reply.
+-- ───────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS campaigns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  artist_slug TEXT NOT NULL,
+  name TEXT NOT NULL,
+  market TEXT,
+  window_start DATE,
+  window_end DATE,
+  target_shows INTEGER DEFAULT 0,
+  emails_sent INTEGER DEFAULT 0,
+  bounces INTEGER DEFAULT 0,
+  replies INTEGER DEFAULT 0,
+  offers INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'Not Started',
+  notes TEXT,
+  anchor_show TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS campaigns_artist_status_idx ON campaigns (artist_slug, status);
+
+ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "anon full access campaigns" ON campaigns;
+CREATE POLICY "anon full access campaigns" ON campaigns
+  FOR ALL USING (true) WITH CHECK (true);
+
 -- Open RLS policies so the anon key can read + write (command-center runs with anon)
 ALTER TABLE processed_emails ENABLE ROW LEVEL SECURITY;
 ALTER TABLE industry_intel  ENABLE ROW LEVEL SECURITY;
