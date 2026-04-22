@@ -330,7 +330,7 @@ function classifyEmail(email) {
   const isPipeline = PIPELINE_TRIGGERS.test(hay) && !isShow;
   const isUrgent = URGENT_TRIGGERS.test(hay);
   if (isShow) classifications.push({ kind: 'show', row: { artist_slug, event_date, city, venue, promoter: null, fee, deal_type: 'Confirmed' } });
-  if (isPipeline) classifications.push({ kind: 'pipeline', row: { artist_slug, stage: detectStage(hay), event_date, market: city, venue, buyer: null, buyer_company: null, fee_offered: fee, notes: `Auto-extracted ${new Date().toISOString().slice(0,10)}: ${snippet}`.slice(0, 500) } });
+  if (isPipeline) classifications.push({ kind: 'pipeline', row: { artist_slug, stage: detectStage(hay), event_date, market: city, venue, buyer: null, buyer_company: null, fee_offered: fee, notes: `Auto-extracted ${new Date().toISOString().slice(0,10)}: ${snippet}`.slice(0, 500), sort_order: 0 } });
   if (isUrgent) classifications.push({ kind: 'urgent', row: { artist_slug, issue: snippet || 'urgent email flagged', priority: 'High', resolved: false } });
   if (classifications.length > 0 && artist_slug) classifications.push({ kind: 'activity', row: { artist_slug, action: 'email_processed', description: snippet.slice(0, 500) } });
   return classifications;

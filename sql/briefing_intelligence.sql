@@ -82,6 +82,14 @@ CREATE INDEX IF NOT EXISTS urgent_issues_priority_sort_idx
 -- ───────────────────────────────────────────────────────────────────────────
 ALTER TABLE buyers ADD COLUMN IF NOT EXISTS last_contact DATE;
 
+-- ───────────────────────────────────────────────────────────────────────────
+-- pipeline + shows: sort_order for drag-and-drop within kanban columns
+-- ───────────────────────────────────────────────────────────────────────────
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
+ALTER TABLE shows    ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
+CREATE INDEX IF NOT EXISTS pipeline_stage_sort_idx ON pipeline (stage, sort_order);
+CREATE INDEX IF NOT EXISTS shows_deal_type_sort_idx ON shows (deal_type, sort_order);
+
 -- Open RLS policies so the anon key can read + write (command-center runs with anon)
 ALTER TABLE processed_emails ENABLE ROW LEVEL SECURITY;
 ALTER TABLE industry_intel  ENABLE ROW LEVEL SECURITY;

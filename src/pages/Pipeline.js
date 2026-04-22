@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLog';
 import Nav from '../components/Nav';
@@ -286,14 +287,44 @@ const COLUMNS = [
 ];
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
-function fmtDate(eventDate, notes) {
-  if (notes && /^[A-Z][a-z]/.test(notes)) {
-    const display = notes.split(' — ')[0];
-    if (display) return display;
-  }
-  if (!eventDate) return '—';
+// ── CARD DISPLAY HELPERS ──────────────────────────────────────────────────────
+// Auto-imported briefing rows stamp notes as "Auto-extracted YYYY-MM-DD: <subject>".
+// That's noise on the card face — detect and strip/replace.
+function isAutoExtractedNotes(notes) {
+  return typeof notes === 'string' && /^Auto-extracted \d{4}-\d{2}-\d{2}:/i.test(notes);
+}
+function cleanNotes(notes) {
+  if (!notes) return '';
+  if (isAutoExtractedNotes(notes)) return ''; // hide the auto-extracted prefix — user types real notes here
+  return notes;
+}
+
+function fmtDealDate(eventDate) {
+  if (!eventDate) return 'Date TBD';
+  // Reject values that aren't YYYY-MM-DD; don't try to second-guess free-text dates
+  if (typeof eventDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) return 'Date TBD';
   const d = new Date(eventDate + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (isNaN(d.getTime())) return 'Date TBD';
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function daysUntil(eventDate) {
+  if (!eventDate || typeof eventDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) return null;
+  const d = new Date(eventDate + 'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  const diffMs = d.getTime() - new Date().setHours(0, 0, 0, 0);
+  const days = Math.round(diffMs / 86400000);
+  return days;
+}
+
+function countdownLabel(days) {
+  if (days === null || days === undefined) return null;
+  if (days < 0) return `${Math.abs(days)}d ago`;
+  if (days === 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  if (days < 14) return `in ${days} days`;
+  if (days < 60) return `in ${Math.round(days / 7)} weeks`;
+  return `in ${Math.round(days / 30)} months`;
 }
 
 // ── SET REMINDER MODAL ────────────────────────────────────────────────────────
@@ -411,7 +442,7 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
     onUpdated({ ...deal, ...form });
   }
 
-  const date = fmtDate(deal.event_date, deal.notes);
+  const date = fmtDealDate(deal.event_date);
   const location = deal.market || deal.city || '—';
   const buyer = deal.buyer_company || deal.buyer || deal.promoter || '—';
 
@@ -555,89 +586,99 @@ function DealDetailPanel({ deal, artistNames, onClose, onUpdated }) {
 }
 
 // ── DEAL CARD ─────────────────────────────────────────────────────────────────
-function DealCard({ deal, col, artistNames, onCardClick }) {
+function DealCard({ deal, col, artistNames, onCardClick, dragProvided, dragSnapshot }) {
   const artistName = artistNames[deal.artist_slug] || deal.artist_slug;
-  const date = fmtDate(deal.event_date, deal.notes);
-  const location = deal.market || deal.city || '—';
-  const fee = deal.fee_offered || deal.fee || '—';
-  const buyer = deal.buyer_company || deal.buyer || deal.promoter || '—';
+  const date = fmtDealDate(deal.event_date);
+  const countdown = countdownLabel(daysUntil(deal.event_date));
+  const city = deal.market || deal.city || '';
+  const venue = deal.venue || '';
+  const buyer = deal.buyer_company || deal.buyer || deal.promoter || '';
+  const fee = deal.fee_offered || deal.fee || '';
 
-  const isShow = !deal.stage; // pipeline deals have stage, shows have deal_type
-  const tableName = isShow ? 'shows' : 'pipeline';
+  const tableName = deal._source || (deal.stage ? 'pipeline' : 'shows');
 
-  // Local state for quick notes so typing is snappy; persist on blur
-  const [notes, setNotes] = useState(deal.notes || '');
-  const [saveStatus, setSaveStatus] = useState(null); // 'saving' | 'saved' | 'error'
-
-  // If parent updates deal.notes (e.g. after detail panel save), sync local state
-  useEffect(() => { setNotes(deal.notes || ''); }, [deal.notes, deal.id]);
+  const [notes, setNotes] = useState(cleanNotes(deal.notes));
+  const [saveStatus, setSaveStatus] = useState(null);
+  useEffect(() => { setNotes(cleanNotes(deal.notes)); }, [deal.notes, deal.id]);
 
   async function persistNotes() {
-    if ((notes || '') === (deal.notes || '')) return; // nothing changed
+    const current = notes || null;
+    const prior = isAutoExtractedNotes(deal.notes) ? null : (deal.notes || null);
+    if (current === prior) return;
     setSaveStatus('saving');
-    const { error } = await supabase.from(tableName).update({ notes: notes || null }).eq('id', deal.id);
-    if (error) {
-      setSaveStatus('error');
-    } else {
-      deal.notes = notes; // keep local card in sync without re-fetching
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus(null), 1500);
-    }
+    const { error } = await supabase.from(tableName).update({ notes: current }).eq('id', deal.id);
+    if (error) { setSaveStatus('error'); return; }
+    deal.notes = current;
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus(null), 1500);
   }
+
+  const dragStyle = dragSnapshot?.isDragging
+    ? 'scale-[1.02] shadow-2xl shadow-black/60 ring-1 ring-indigo-500/60 bg-gray-850'
+    : '';
 
   return (
     <div
+      ref={dragProvided?.innerRef}
+      {...(dragProvided?.draggableProps || {})}
+      style={dragProvided?.draggableProps?.style}
       onClick={() => onCardClick(deal)}
-      className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-800/40 transition-colors cursor-pointer"
+      className={`bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-800/40 transition-transform transition-colors cursor-pointer ${dragStyle}`}
     >
-      {/* Artist name */}
-      <Link
-        to={`/artists/${deal.artist_slug}`}
-        onClick={e => e.stopPropagation()}
-        className="text-white font-bold text-sm hover:text-indigo-300 transition-colors block mb-2"
-      >
-        {artistName}
-      </Link>
+      {/* Header row: drag handle + artist name + stage badge */}
+      <div className="flex items-start gap-2 mb-2">
+        <span
+          {...(dragProvided?.dragHandleProps || {})}
+          onClick={e => e.stopPropagation()}
+          className="text-gray-600 hover:text-gray-400 cursor-grab active:cursor-grabbing text-base select-none"
+          title="Drag to reorder or change stage"
+        >⠿</span>
+        <Link
+          to={`/artists/${deal.artist_slug}`}
+          onClick={e => e.stopPropagation()}
+          className="text-white font-bold text-base hover:text-indigo-300 transition-colors flex-1 min-w-0 truncate"
+        >
+          {artistName}
+        </Link>
+      </div>
 
-      {/* Stage sub-label */}
-      {deal.stage || deal.deal_type ? (
-        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded border mb-3 inline-block ${col.headerBg} ${col.headerText} border-current/30`}>
+      {(deal.stage || deal.deal_type) && (
+        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded border inline-block mb-3 ${col.headerBg} ${col.headerText} border-current/30`}>
           {deal.stage || deal.deal_type}
         </span>
-      ) : null}
+      )}
 
-      {/* Details */}
+      {/* Details — labels always shown, values blank (not "—") when missing */}
       <div className="space-y-1.5 text-xs">
         <div className="flex items-start gap-2">
-          <span className="text-gray-600 w-12 flex-shrink-0">Date</span>
-          <span className="text-gray-300">{date}</span>
+          <span className="text-gray-600 w-14 flex-shrink-0">Date</span>
+          <span className={date === 'Date TBD' ? 'text-gray-600 italic' : 'text-gray-300'}>
+            {date}
+            {countdown && <span className="ml-2 text-gray-500 text-[11px]">· {countdown}</span>}
+          </span>
         </div>
         <div className="flex items-start gap-2">
-          <span className="text-gray-600 w-12 flex-shrink-0">City</span>
-          <span className="text-gray-300">{location}</span>
+          <span className="text-gray-600 w-14 flex-shrink-0">City</span>
+          <span className="text-gray-300">{city}</span>
         </div>
         <div className="flex items-start gap-2">
-          <span className="text-gray-600 w-12 flex-shrink-0">Venue</span>
-          <span className="text-gray-300 truncate">{deal.venue || '—'}</span>
+          <span className="text-gray-600 w-14 flex-shrink-0">Venue</span>
+          <span className="text-gray-300 truncate">{venue}</span>
         </div>
         <div className="flex items-start gap-2">
-          <span className="text-gray-600 w-12 flex-shrink-0">Buyer</span>
+          <span className="text-gray-600 w-14 flex-shrink-0">Buyer</span>
           <span className="text-gray-300">{buyer}</span>
         </div>
       </div>
 
-      {/* Fee footer */}
-      {fee && fee !== '—' && (
-        <div className={`mt-3 pt-3 border-t border-gray-800 font-bold text-sm ${col.headerText}`}>
+      {fee && (
+        <div className="mt-3 pt-3 border-t border-gray-800 font-bold text-sm text-emerald-400">
           {fee}
         </div>
       )}
 
-      {/* Quick Notes — saves on blur, stops click-to-open */}
-      <div
-        className="mt-3 pt-3 border-t border-gray-800"
-        onClick={e => e.stopPropagation()}
-      >
+      {/* Quick Notes — cleaned, editable */}
+      <div className="mt-3 pt-3 border-t border-gray-800" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <span className="text-gray-600 text-[10px] uppercase tracking-wider font-semibold">Quick Notes</span>
           {saveStatus === 'saving' && <span className="text-gray-500 text-[10px]">saving…</span>}
@@ -648,14 +689,12 @@ function DealCard({ deal, col, artistNames, onCardClick }) {
           value={notes}
           onChange={e => setNotes(e.target.value)}
           onBlur={persistNotes}
+          onMouseDown={e => e.stopPropagation()}
           placeholder="Jot a quick thought…"
           rows={2}
           className="w-full bg-gray-950 border border-gray-800 hover:border-gray-700 focus:border-indigo-600 text-gray-300 text-xs rounded-md px-2 py-1.5 resize-none focus:outline-none placeholder-gray-700"
         />
       </div>
-
-      {/* Click hint */}
-      <div className="mt-2 text-gray-700 text-xs">Click elsewhere to edit →</div>
     </div>
   );
 }
@@ -663,33 +702,51 @@ function DealCard({ deal, col, artistNames, onCardClick }) {
 // ── KANBAN COLUMN ─────────────────────────────────────────────────────────────
 function KanbanColumn({ col, deals, artistNames, onCardClick }) {
   return (
-    <div className={`flex-1 min-w-[220px] max-w-xs flex flex-col rounded-xl border-t-2 ${col.accent} bg-gray-900/50`}>
-      {/* Column header */}
-      <div className={`px-4 py-3 rounded-t-xl flex items-center justify-between ${col.headerBg}`}>
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${col.dot}`} />
-          <span className={`text-sm font-bold uppercase tracking-wider ${col.headerText}`}>
-            {col.label}
-          </span>
-        </div>
-        <span className="text-gray-500 text-xs font-semibold bg-gray-800 px-2 py-0.5 rounded-full">
-          {deals.length}
-        </span>
-      </div>
-
-      {/* Cards */}
-      <div className="p-3 flex flex-col gap-3 flex-1">
-        {deals.length === 0 ? (
-          <div className="text-gray-700 text-xs text-center py-6 border border-dashed border-gray-800 rounded-lg">
-            No deals
+    <Droppable droppableId={col.id}>
+      {(droppableProvided, dropSnapshot) => (
+        <div
+          ref={droppableProvided.innerRef}
+          {...droppableProvided.droppableProps}
+          className={`flex-1 min-w-[240px] max-w-xs flex flex-col rounded-xl border-t-2 ${col.accent} bg-gray-900/50 transition-colors ${
+            dropSnapshot.isDraggingOver ? 'ring-2 ring-indigo-500/50 bg-gray-900/80' : ''
+          }`}
+        >
+          <div className={`px-4 py-3 rounded-t-xl flex items-center justify-between ${col.headerBg}`}>
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${col.dot}`} />
+              <span className={`text-sm font-bold uppercase tracking-wider ${col.headerText}`}>{col.label}</span>
+            </div>
+            <span className="text-gray-500 text-xs font-semibold bg-gray-800 px-2 py-0.5 rounded-full">
+              {deals.length}
+            </span>
           </div>
-        ) : (
-          deals.map((deal) => (
-            <DealCard key={deal.id} deal={deal} col={col} artistNames={artistNames} onCardClick={onCardClick} />
-          ))
-        )}
-      </div>
-    </div>
+
+          <div className="p-3 flex flex-col gap-3 flex-1">
+            {deals.length === 0 && !dropSnapshot.isDraggingOver ? (
+              <div className="text-gray-700 text-xs text-center py-6 border border-dashed border-gray-800 rounded-lg">
+                No deals
+              </div>
+            ) : (
+              deals.map((deal, idx) => (
+                <Draggable key={deal.id} draggableId={String(deal.id)} index={idx}>
+                  {(dragProvided, dragSnapshot) => (
+                    <DealCard
+                      deal={deal}
+                      col={col}
+                      artistNames={artistNames}
+                      onCardClick={onCardClick}
+                      dragProvided={dragProvided}
+                      dragSnapshot={dragSnapshot}
+                    />
+                  )}
+                </Draggable>
+              ))
+            )}
+            {droppableProvided.placeholder}
+          </div>
+        </div>
+      )}
+    </Droppable>
   );
 }
 
@@ -706,6 +763,124 @@ export default function Pipeline() {
 
   function handleCardClick(deal) { setSelectedDeal(deal); }
 
+  // ── DRAG AND DROP ────────────────────────────────────────────────────────
+  async function handleDragEnd(result) {
+    const { source, destination, draggableId } = result;
+    if (!destination) return;
+    if (source.droppableId === destination.droppableId && source.index === destination.index) return;
+
+    const srcCol = COLUMNS.find(c => c.id === source.droppableId);
+    const dstCol = COLUMNS.find(c => c.id === destination.droppableId);
+    if (!srcCol || !dstCol) return;
+
+    const srcTable = srcCol.source;   // 'pipeline' | 'shows'
+    const dstTable = dstCol.source;
+    const newStage = dstCol.stages[0]; // each column has a single target stage
+
+    // Find the moving deal
+    const srcList = srcTable === 'pipeline' ? pipelineDeals : shows;
+    const moving  = srcList.find(d => String(d.id) === draggableId);
+    if (!moving) return;
+
+    // Snapshot for rollback
+    const beforeP = pipelineDeals;
+    const beforeS = shows;
+
+    // Build updated destination list (optimistically)
+    const destListAll = dstTable === 'pipeline' ? pipelineDeals : shows;
+    const destColDeals = destListAll
+      .filter(d => dstCol.stages.includes(d.stage) || dstCol.stages.includes(d.deal_type))
+      .filter(d => String(d.id) !== draggableId);
+    const movedShaped = dstTable === 'pipeline'
+      ? { ...moving, stage: newStage, deal_type: null, _source: 'pipeline' }
+      : { ...moving, stage: null, deal_type: newStage, _source: 'shows' };
+    destColDeals.splice(destination.index, 0, movedShaped);
+
+    // Optimistic local update
+    if (srcTable === dstTable) {
+      const otherDeals = destListAll.filter(d =>
+        !dstCol.stages.includes(d.stage) &&
+        !dstCol.stages.includes(d.deal_type) &&
+        String(d.id) !== draggableId
+      );
+      const nextAll = [...otherDeals, ...destColDeals.map((d, i) => ({ ...d, sort_order: i }))];
+      if (srcTable === 'pipeline') setPipelineDeals(nextAll); else setShows(nextAll);
+    } else {
+      // Cross-table: remove from source list, add to dest list
+      const srcOther = srcList.filter(d => String(d.id) !== draggableId);
+      const dstOther = destListAll.filter(d =>
+        !dstCol.stages.includes(d.stage) &&
+        !dstCol.stages.includes(d.deal_type)
+      );
+      const dstNext = [...dstOther, ...destColDeals.map((d, i) => ({ ...d, sort_order: i }))];
+      if (srcTable === 'pipeline') { setPipelineDeals(srcOther); setShows(dstNext); }
+      else                         { setShows(srcOther); setPipelineDeals(dstNext); }
+    }
+
+    // Persist
+    try {
+      if (srcTable === dstTable) {
+        // Same-table — UPDATE the moved row (stage if cross-column, always sort_order)
+        // Plus reindex sort_order for all cards in the destination column.
+        const updates = destColDeals.map((d, i) => ({
+          id: d.id,
+          sort_order: i,
+          ...(srcTable === 'pipeline' ? { stage: newStage } : { deal_type: newStage }),
+        }));
+        // Supabase upsert by primary key (id is PK)
+        const { error } = await supabase.from(srcTable).upsert(updates, { onConflict: 'id' });
+        if (error) throw error;
+      } else {
+        // Cross-table — DELETE from source, INSERT into destination table.
+        // The new row gets a new id.
+        const payload = { ...moving };
+        delete payload.id;
+        delete payload.created_at;
+        delete payload._source;
+        if (dstTable === 'pipeline') {
+          payload.stage = newStage;
+          delete payload.deal_type;
+          delete payload.status; // shows.status isn't on pipeline schema
+          delete payload.hold_number;
+        } else {
+          payload.deal_type = newStage;
+          payload.status = newStage;
+          delete payload.stage;
+          delete payload.fee_offered; delete payload.fee_target;
+          if (moving.fee_offered && !moving.fee) payload.fee = moving.fee_offered;
+          delete payload.next_action; delete payload.manager_cc;
+          delete payload.buyer_company; delete payload.buyer;
+          if (!payload.promoter) payload.promoter = moving.buyer_company || moving.buyer || null;
+          delete payload.market;
+          if (!payload.city) payload.city = moving.market || null;
+        }
+        payload.sort_order = destination.index;
+
+        const { data: inserted, error: insErr } = await supabase.from(dstTable).insert(payload).select().single();
+        if (insErr) throw insErr;
+        const { error: delErr } = await supabase.from(srcTable).delete().eq('id', moving.id);
+        if (delErr) { /* best-effort — log but don't rollback the successful insert */ console.error('dst insert ok, src delete failed:', delErr.message); }
+
+        // Patch local state: swap the temporary shaped row for the real inserted row
+        const swap = (list) => list.map(d => d.id === moving.id ? { ...inserted, _source: dstTable } : d);
+        if (dstTable === 'pipeline') setPipelineDeals(prev => swap(prev));
+        else setShows(prev => swap(prev));
+
+        // Reindex the destination column (bulk)
+        const destColFinal = destColDeals.map((d, i) => ({
+          id: d.id === moving.id ? inserted.id : d.id,
+          sort_order: i,
+        }));
+        await supabase.from(dstTable).upsert(destColFinal, { onConflict: 'id' });
+      }
+    } catch (err) {
+      // Roll back — restore previous local state so the user sees the failure
+      setPipelineDeals(beforeP);
+      setShows(beforeS);
+      setError(`Drag save failed: ${err.message || err}`);
+    }
+  }
+
   function handleDealUpdated(updated) {
     if (pipelineDeals.find(d => d.id === updated.id)) {
       setPipelineDeals(prev => prev.map(d => d.id === updated.id ? { ...d, ...updated } : d));
@@ -718,17 +893,20 @@ export default function Pipeline() {
   useEffect(() => {
     async function load() {
       try {
+        // Client-side sort in columnDeals() uses sort_order if present, falling
+        // back to created_at — so we just load raw rows here. (Server-side
+        // .order('sort_order') would throw before the migration is applied.)
         const [pRes, sRes, aRes] = await Promise.all([
-          supabase.from('pipeline').select('*').order('event_date'),
-          supabase.from('shows').select('*').order('event_date'),
+          supabase.from('pipeline').select('*').order('created_at', { ascending: false }),
+          supabase.from('shows').select('*').order('created_at', { ascending: false }),
           supabase.from('artists').select('id, name, slug').order('name'),
         ]);
         if (pRes.error) throw pRes.error;
         if (sRes.error) throw sRes.error;
         if (aRes.error) throw aRes.error;
 
-        setPipelineDeals(pRes.data);
-        setShows(sRes.data);
+        setPipelineDeals((pRes.data || []).map(d => ({ ...d, _source: 'pipeline' })));
+        setShows((sRes.data || []).map(d => ({ ...d, _source: 'shows' })));
         setArtists(aRes.data);
       } catch (err) {
         setError(err.message);
@@ -753,14 +931,20 @@ export default function Pipeline() {
     ? shows.filter((s) => s.artist_slug === filterSlug)
     : shows;
 
-  // Assign each deal to its kanban column
+  // Assign each deal to its kanban column, sorted by sort_order ASC
+  // (ties break newest-first so briefing inserts with sort_order=0 land on top)
   const columnDeals = useMemo(() => {
+    const byOrder = (a, b) => {
+      const ao = a.sort_order ?? 0, bo = b.sort_order ?? 0;
+      if (ao !== bo) return ao - bo;
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    };
     return COLUMNS.map((col) => {
       let deals = [];
       if (col.source === 'pipeline') {
-        deals = filteredPipeline.filter((d) => col.stages.includes(d.stage));
+        deals = filteredPipeline.filter((d) => col.stages.includes(d.stage)).slice().sort(byOrder);
       } else {
-        deals = filteredShows.filter((s) => col.stages.includes(s.deal_type));
+        deals = filteredShows.filter((s) => col.stages.includes(s.deal_type)).slice().sort(byOrder);
       }
       return { ...col, deals };
     });
@@ -850,17 +1034,19 @@ export default function Pipeline() {
             ))}
           </div>
         ) : (
-          <div className="flex gap-4 overflow-x-auto pb-6" style={{ minHeight: '60vh' }}>
-            {columnDeals.map((col) => (
-              <KanbanColumn
-                key={col.id}
-                col={col}
-                deals={col.deals}
-                artistNames={artistNames}
-                onCardClick={handleCardClick}
-              />
-            ))}
-          </div>
+          <DragDropContext onDragEnd={handleDragEnd}>
+            <div className="flex gap-4 overflow-x-auto pb-6" style={{ minHeight: '60vh' }}>
+              {columnDeals.map((col) => (
+                <KanbanColumn
+                  key={col.id}
+                  col={col}
+                  deals={col.deals}
+                  artistNames={artistNames}
+                  onCardClick={handleCardClick}
+                />
+              ))}
+            </div>
+          </DragDropContext>
         )}
       </main>
 
