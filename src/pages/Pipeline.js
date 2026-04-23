@@ -272,15 +272,27 @@ const COLUMNS = [
   },
   {
     id: 'confirmed',
-    label: 'Confirmed + Advancing',
-    stages: ['Confirmed', 'Advancing'], // merged column
-    defaultStageOnDrop: 'Confirmed',     // drops land as Confirmed; detail panel escalates to Advancing
+    label: 'Confirmed',
+    stages: ['Confirmed'],
+    defaultStageOnDrop: 'Confirmed',
     source: 'shows',
-    accent: 'border-teal-500',
-    headerBg: 'bg-teal-900/30',
-    headerText: 'text-teal-300',
-    dot: 'bg-teal-500',
-    flex: 5, // ~25%
+    accent: 'border-emerald-600',
+    headerBg: 'bg-emerald-900/30',
+    headerText: 'text-emerald-300',
+    dot: 'bg-emerald-500',
+    flex: 4,
+  },
+  {
+    id: 'advancing',
+    label: 'Advancing',
+    stages: ['Advancing'],
+    defaultStageOnDrop: 'Advancing',
+    source: 'shows',
+    accent: 'border-blue-500',
+    headerBg: 'bg-blue-900/30',
+    headerText: 'text-blue-300',
+    dot: 'bg-blue-500',
+    flex: 4,
   },
   {
     id: 'settled',
@@ -292,7 +304,7 @@ const COLUMNS = [
     headerBg: 'bg-gray-800/50',
     headerText: 'text-gray-400',
     dot: 'bg-gray-500',
-    flex: 3, // ~15%
+    flex: 3,
   },
 ];
 
@@ -726,20 +738,23 @@ function DealCard({ deal, col, artistNames, onCardClick, dragProvided, dragSnaps
     ? 'border-red-600/70 ring-1 ring-red-600/40'
     : 'border-gray-800';
 
+  // Whole card is the drag handle — @hello-pangea/dnd ignores
+  // drag-start pointer events that originate on textarea/input, so the
+  // Quick Notes field still works. Link's onClick stops propagation so
+  // clicking the artist name navigates instead of opening the deal panel.
   return (
     <div
       ref={dragProvided?.innerRef}
       {...(dragProvided?.draggableProps || {})}
+      {...(dragProvided?.dragHandleProps || {})}
       style={dragProvided?.draggableProps?.style}
       onClick={() => onCardClick(deal)}
-      className={`bg-gray-900 border ${borderClass} rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-800/40 transition-transform transition-colors cursor-pointer ${dragStyle}`}
+      className={`bg-gray-900 border ${borderClass} rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-800/40 transition-transform transition-colors cursor-grab active:cursor-grabbing ${dragStyle}`}
     >
       <div className="flex items-start gap-2 mb-2">
         <span
-          {...(dragProvided?.dragHandleProps || {})}
-          onClick={e => e.stopPropagation()}
-          className="text-gray-600 hover:text-gray-400 cursor-grab active:cursor-grabbing text-base select-none"
-          title="Drag to reorder or change stage"
+          className="text-gray-600 text-base select-none pointer-events-none"
+          title="Drag anywhere on the card to reorder or change stage"
         >⠿</span>
         <Link
           to={`/artists/${deal.artist_slug}`}
