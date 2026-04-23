@@ -45,33 +45,41 @@ const SYSTEM_PROMPT = `You are a booking agent assistant. Extract structured off
 
 Omit the field entirely rather than guessing. Treat ambiguous numbers as null.`;
 
-// ── extract text ───────────────────────────────────────────────────────────
-async function extractText(file) {
-  const buf = await file.arrayBuffer();
+// ── file → claude content ─────────────────────────────────────────────────
+// PDFs go straight to Claude as a base64 document block — Claude 4.x reads
+// PDFs natively, no pdfjs worker required. DOCX still needs local text
+// extraction (Claude doesn't decode .docx), but mammoth is small + has no
+// worker so it's reliable in the browser.
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+async function buildUserContentForFile(file) {
   const lower = file.name.toLowerCase();
+  if (lower.endsWith('.pdf') || file.type === 'application/pdf') {
+    const buf = await file.arrayBuffer();
+    const base64 = arrayBufferToBase64(buf);
+    return [
+      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+      { type: 'text', text: 'Extract the offer data from this PDF and return JSON per the schema in the system prompt.' },
+    ];
+  }
   if (lower.endsWith('.docx') || file.type.includes('officedocument.wordprocessingml')) {
     const mammoth = (await import('mammoth/mammoth.browser')).default;
-    const { value } = await mammoth.extractRawText({ arrayBuffer: buf });
-    return value;
-  }
-  if (lower.endsWith('.pdf') || file.type === 'application/pdf') {
-    const pdfjsLib = await import('pdfjs-dist');
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    let out = '';
-    for (let p = 1; p <= pdf.numPages; p++) {
-      const page = await pdf.getPage(p);
-      const content = await page.getTextContent();
-      out += content.items.map(it => it.str).join(' ') + '\n';
-    }
-    return out;
+    const { value: text } = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    if (!text || text.trim().length < 40) throw new Error('Document appears empty');
+    return text.slice(0, 60_000);
   }
   throw new Error(`Unsupported file type: ${file.name}`);
 }
 
-// ── claude call ────────────────────────────────────────────────────────────
-async function callClaude(text) {
+async function callClaude(userContent) {
   const key = process.env.REACT_APP_ANTHROPIC_API_KEY;
   if (!key) throw new Error('REACT_APP_ANTHROPIC_API_KEY missing — set in .env.local and restart');
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -86,7 +94,8 @@ async function callClaude(text) {
       model: CLAUDE_MODEL,
       max_tokens: 2048,
       system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: text.slice(0, 60_000) }],
+      // userContent is a string for DOCX, an array for PDF document input
+      messages: [{ role: 'user', content: userContent }],
     }),
   });
   if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -210,12 +219,11 @@ export default function OfferBin() {
     if (!file) return;
     const ok = /\.(pdf|docx)$/i.test(file.name) || /pdf|wordprocessingml/i.test(file.type);
     if (!ok) { setPhase('error'); setMsg('PDF OR DOCX ONLY'); reset(); return; }
-    setPhase('scanning'); setMsg('SCANNING…');
+    setPhase('scanning'); setMsg('READING FILE…');
     try {
-      const text = await extractText(file);
-      if (!text || text.trim().length < 40) throw new Error('Document appears empty');
+      const userContent = await buildUserContentForFile(file);
       setMsg('ASKING CLAUDE…');
-      const extracted = await callClaude(text);
+      const extracted = await callClaude(userContent);
       setMsg('WRITING TO SUPABASE…');
       const { verb, slug, city, event_date } = await pushToSupabase(extracted);
       setPhase('success');
