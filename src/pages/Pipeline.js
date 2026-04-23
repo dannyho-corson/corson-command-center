@@ -1233,6 +1233,9 @@ export default function Pipeline() {
         {/* ── CAMPAIGNS (above the kanban) ── */}
         <CampaignsSection artistNames={artistNames} />
 
+        {/* ── OFFER BIN — PDF/DOCX offer ingest ── */}
+        <OfferBin />
+
         {/* ── TODAY'S FOCUS ── */}
         <TodaysFocus artistNames={artistNames} />
 
@@ -1279,9 +1282,6 @@ export default function Pipeline() {
             </div>
           </DragDropContext>
         )}
-
-        {/* ── OFFER BIN — PDF/DOCX offer ingest ── */}
-        <OfferBin />
       </main>
 
       {selectedDeal && (
