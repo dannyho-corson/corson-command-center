@@ -8,6 +8,7 @@ import ConfirmationEmailModal from '../components/ConfirmationEmailModal';
 import OfferForwardEmailModal from '../components/OfferForwardEmailModal';
 import CampaignsSection from '../components/CampaignsSection';
 import TodaysFocus from '../components/TodaysFocus';
+import OfferBin from '../components/OfferBin';
 
 // ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
 // Corson 5-stage pipeline:
@@ -809,6 +810,11 @@ function OfferBody({ deal, daysSinceActivity }) {
   const countdown = countdownLabel(daysUntil(deal.event_date));
   const buyer = deal.buyer_company || deal.buyer || deal.promoter || '';
   const fee = deal.fee_offered || deal.fee || '';
+  const walkout = deal.walkout_potential;
+  const age = deal.age_restriction;
+  const radius = deal.radius_clause;
+  const email = deal.buyer_email;
+
   return (
     <div className="space-y-1.5 text-xs">
       <div>
@@ -823,11 +829,29 @@ function OfferBody({ deal, daysSinceActivity }) {
         </div>
       )}
       {buyer && <div><span className="text-gray-600 mr-2">Buyer</span><span className="text-gray-300">{buyer}</span></div>}
-      {deal.capacity && <div><span className="text-gray-600 mr-2">Cap</span><span className="text-gray-300">{deal.capacity}</span></div>}
+      {email && (
+        <div><span className="text-gray-600 mr-2">Email</span>
+          <a href={`mailto:${email}`} onClick={e => e.stopPropagation()}
+            className="text-indigo-300 hover:text-indigo-200 underline underline-offset-2 truncate">{email}</a>
+        </div>
+      )}
+      {(deal.capacity || age) && (
+        <div className="flex items-center gap-3">
+          {deal.capacity && <span><span className="text-gray-600 mr-1">Cap</span><span className="text-gray-300">{deal.capacity}</span></span>}
+          {age && (
+            <span className="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border border-gray-700 text-gray-300">
+              {age}
+            </span>
+          )}
+        </div>
+      )}
 
       {fee && (
-        <div className="pt-2 flex items-center gap-2">
+        <div className="pt-2 flex items-center gap-2 flex-wrap">
           <span className="text-emerald-400 font-bold text-lg">{fee}</span>
+          {Number.isFinite(Number(walkout)) && Number(walkout) > 0 && (
+            <span className="text-[11px] text-emerald-300/80">/ walkout ~{walkout}</span>
+          )}
           {deal.deal_type && (
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border border-gray-700 text-gray-300">
               {deal.deal_type}
@@ -836,6 +860,13 @@ function OfferBody({ deal, daysSinceActivity }) {
         </div>
       )}
       <HGRSummary deal={deal} />
+
+      {radius && (
+        <div className="mt-2 text-[11px] text-red-300 bg-red-950/30 border border-red-900/60 rounded px-2 py-1 line-clamp-2">
+          ⚠ Radius: {radius}
+        </div>
+      )}
+
       {daysSinceActivity !== null && (
         <div className="text-[11px] text-gray-500 pt-1">{daysSinceActivity}d since last activity</div>
       )}
@@ -1248,6 +1279,9 @@ export default function Pipeline() {
             </div>
           </DragDropContext>
         )}
+
+        {/* ── OFFER BIN — PDF/DOCX offer ingest ── */}
+        <OfferBin />
       </main>
 
       {selectedDeal && (

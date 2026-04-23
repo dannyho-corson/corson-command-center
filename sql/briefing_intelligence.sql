@@ -133,6 +133,14 @@ ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS bonus_structure TEXT;
 ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS capacity        INTEGER;
 ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS event_type      TEXT;
 
+-- Offer Bin fields (PDF/DOCX auto-extraction pushes these)
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS walkout_potential NUMERIC;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS age_restriction   TEXT;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS buyer_phone       TEXT;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS buyer_email       TEXT;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS radius_clause     TEXT;
+ALTER TABLE pipeline ADD COLUMN IF NOT EXISTS set_time          TEXT;
+
 ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "anon full access campaigns" ON campaigns;
 CREATE POLICY "anon full access campaigns" ON campaigns
