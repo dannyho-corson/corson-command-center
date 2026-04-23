@@ -346,6 +346,10 @@ async function validArtistSlugs(supabase) {
   if (error) throw new Error(`artists: ${error.message}`);
   return new Set(data.map(r => r.slug));
 }
+async function loadArtistsLite(supabase) {
+  const { data } = await supabase.from('artists').select('slug, name');
+  return data || [];
+}
 // Preflight — set once at startup based on table existence
 let PROCESSED_EMAILS_AVAILABLE = false;
 let PROCESSED_EMAILS_HAS_MESSAGE_HASH = false; // legacy column on older schemas
@@ -410,7 +414,7 @@ You MUST return valid JSON matching this exact schema:
   "new_buyers": [{"name": "...", "email": "...", "company": "...", "market": "..."}],
   "target_updates": [{"target_id": "<uuid>", "new_status": "...", "note": "..."}],
   "campaign_replies": [{"campaign_id": "<uuid>", "buyer_email": "...", "is_offer": false, "note": "..."}],
-  "deal_extractions": [{"artist_slug": "...", "event_date": "YYYY-MM-DD", "deal_type": "Landed|All In|Fee+Flights|TBD", "event_type": "Headline|Direct Support|Festival Stage|B2B|Club Night", "capacity": 800, "hotel_included": true, "ground_included": true, "rider_included": true, "bonus_structure": "+$500 at 400 tix", "fee_offered": "$2,500"}]
+  "pipeline_updates": [{"artist_slug": "...", "event_date": "YYYY-MM-DD", "deal_type": "Landed|All In|Fee+Flights|TBD", "event_type": "Headline|Direct Support|Festival Stage|B2B|Club Night", "capacity": 800, "hotel_included": true, "ground_included": true, "rider_included": true, "bonus_structure": "+$500 at 400 tix", "fee_offered": "$2,500"}]
 }
 
 Rules:
@@ -457,7 +461,7 @@ TARGET UPDATES — for each email today, if the sender matches an existing targe
   - note: one-line summary of today's interaction (e.g. "4/17 — responded to Boston 6/26 offer")
 Only include a target_update when there IS a matching row in the targets list. Return [] otherwise.
 
-DEAL EXTRACTIONS — for each offer email that mentions an artist from the roster with a specific date, extract offer structure details so the pipeline row is enriched. Look for:
+PIPELINE UPDATES — for each offer email that mentions an artist from the roster with a specific date, extract offer structure details so the pipeline row is enriched. Look for:
   - "all in" / "landed" / "fee + flights" / "fee plus flights" → deal_type
   - "hotel", "accommodation", "lodging" → hotel_included: true
   - "ground", "ground transport", "airport pickup", "G+R" → ground_included: true
@@ -513,10 +517,10 @@ ${industryBible || '(not loaded)'}`.slice(0, 60_000);
     if (!Array.isArray(parsed.new_buyers)) parsed.new_buyers = [];
     if (!Array.isArray(parsed.target_updates)) parsed.target_updates = [];
     if (!Array.isArray(parsed.campaign_replies)) parsed.campaign_replies = [];
-    if (!Array.isArray(parsed.deal_extractions)) parsed.deal_extractions = [];
+    if (!Array.isArray(parsed.pipeline_updates)) parsed.pipeline_updates = [];
     // Validate artist slugs in urgent
     parsed.urgent = parsed.urgent.filter(u => validSlugs.has(u.artist_slug));
-    log(`Claude returned: ${parsed.urgent.length} urgent, ${parsed.draft_replies.length} drafts, ${parsed.new_buyers.length} new buyers, ${parsed.target_updates.length} target updates, ${parsed.campaign_replies.length} campaign replies, ${parsed.deal_extractions.length} deal extractions`);
+    log(`Claude returned: ${parsed.urgent.length} urgent, ${parsed.draft_replies.length} drafts, ${parsed.new_buyers.length} new buyers, ${parsed.target_updates.length} target updates, ${parsed.campaign_replies.length} campaign replies, ${parsed.pipeline_updates.length} pipeline updates`);
     return parsed;
   } catch (e) {
     recordError('claude', e);
@@ -531,10 +535,14 @@ function applescriptEscape(s) {
 }
 function createOutlookDraft({ to_email, subject, body }) {
   const tagged = `[AI DRAFT – REVIEW] ${subject || ''}`.slice(0, 240);
+  // If no recipient found, leave the To: blank so Danny can fill it before sending.
+  const recipientLine = to_email
+    ? `make new recipient at newMsg with properties {email address:{address:"${applescriptEscape(to_email)}"}}`
+    : `-- recipient not set (no email found)`;
   const script = `
     tell application "Microsoft Outlook"
       set newMsg to make new outgoing message with properties {subject:"${applescriptEscape(tagged)}", content:"${applescriptEscape(body)}"}
-      make new recipient at newMsg with properties {email address:{address:"${applescriptEscape(to_email)}"}}
+      ${recipientLine}
     end tell
     return "OK"
   `;
@@ -548,6 +556,113 @@ function createOutlookDraft({ to_email, subject, body }) {
   } finally {
     try { fs.unlinkSync(tmp); } catch {}
   }
+}
+
+// ─── 7-day stale deal detector ────────────────────────────────────────────
+// Runs at the start of every briefing run, before reading emails. For each
+// pipeline row in Inquiry/Request or Offer In + Negotiating with no
+// activity in 7+ days: insert a deduped urgent_issues row + drop a
+// follow-up draft into Outlook. Capped at MAX_STALE_DRAFTS to avoid
+// flooding the Drafts folder on the first-ever run.
+const MAX_STALE_DRAFTS = 10;
+
+async function probeColumn(supabase, table, col) {
+  const { error } = await supabase.from(table).select(col).limit(1);
+  return !error;
+}
+
+async function findBuyerEmail(supabase, buyerCompany, buyerName) {
+  if (buyerCompany) {
+    const { data } = await supabase.from('buyers').select('email').ilike('company', buyerCompany).limit(1);
+    if (data?.[0]?.email) return data[0].email;
+  }
+  if (buyerName) {
+    const { data } = await supabase.from('buyers').select('email').ilike('name', buyerName).limit(1);
+    if (data?.[0]?.email) return data[0].email;
+  }
+  return null;
+}
+
+async function staleUrgentExists(supabase, artist_slug, dealKey) {
+  const { data } = await supabase
+    .from('urgent_issues').select('id')
+    .eq('artist_slug', artist_slug)
+    .ilike('issue', `%[#${dealKey}]%`)
+    .eq('resolved', false).limit(1);
+  return (data?.length || 0) > 0;
+}
+
+function staleFollowUpBody({ stage, artist, buyer, eventDate, city }) {
+  const dateBit = eventDate ? ` on ${eventDate}` : '';
+  const cityBit = city ? ` in ${city}` : '';
+  if (stage === 'Inquiry / Request') {
+    return [
+      `Hi ${buyer || 'there'},`, '',
+      `Just following up on your inquiry for ${artist}${dateBit}${cityBit}. Still interested? Happy to discuss further.`, '',
+      `Best,`, `Danny`,
+    ].join('\n');
+  }
+  return [
+    `Hi ${buyer || 'there'},`, '',
+    `Wanted to follow up on the offer for ${artist}${dateBit}${cityBit}. Have you had a chance to discuss internally? Let me know where things stand.`, '',
+    `Best,`, `Danny`,
+  ].join('\n');
+}
+
+async function detectStaleDeals(supabase, artistsRows) {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+  const useUpdatedAt = await probeColumn(supabase, 'pipeline', 'updated_at');
+  const ts = useUpdatedAt ? 'updated_at' : 'created_at';
+
+  const { data: stale, error } = await supabase
+    .from('pipeline')
+    .select(`id, artist_slug, stage, buyer, buyer_company, market, venue, event_date, ${ts}`)
+    .in('stage', ['Inquiry / Request', 'Offer In + Negotiating'])
+    .lt(ts, sevenDaysAgo);
+  if (error) { recordError('stale-detect', error); return { detected: 0, byStage: {}, drafts: 0, urgent: 0 }; }
+  if (!stale || stale.length === 0) { log('stale-deal scan: 0 deals'); return { detected: 0, byStage: {}, drafts: 0, urgent: 0 }; }
+
+  const artistName = (slug) => (artistsRows.find(a => a.slug === slug)?.name || slug);
+  const byStage = { 'Inquiry / Request': 0, 'Offer In + Negotiating': 0 };
+  let urgent = 0, drafts = 0;
+
+  for (const d of stale) {
+    byStage[d.stage] = (byStage[d.stage] || 0) + 1;
+    const dealKey = String(d.id).slice(0, 8);
+    const days = Math.floor((Date.now() - new Date(d[ts]).getTime()) / 86400000);
+    const buyer = d.buyer_company || d.buyer || 'buyer';
+    const city  = d.market || d.venue || '';
+    const artist = artistName(d.artist_slug);
+    const issueText = `[#${dealKey}] 7-day follow-up needed: ${artist} — ${buyer} — ${city || 'no city'} — ${days} days no activity`;
+
+    // Dedup
+    if (await staleUrgentExists(supabase, d.artist_slug, dealKey)) continue;
+
+    // Insert urgent
+    const { error: uerr } = await supabase.from('urgent_issues').insert({
+      artist_slug: d.artist_slug,
+      issue: issueText.slice(0, 500),
+      priority: 'High',
+      resolved: false,
+    });
+    if (uerr) { recordError(`stale urgent ${d.id}`, uerr); continue; }
+    urgent++;
+    counts.urgent = (counts.urgent || 0) + 1;
+    log(`Stale deal flagged: ${d.artist_slug} — ${days} days`);
+
+    // Outlook draft (capped)
+    if (drafts >= MAX_STALE_DRAFTS) continue;
+    const to_email = await findBuyerEmail(supabase, d.buyer_company, d.buyer);
+    const subject = `Following up — ${artist} / ${city || 'TBD'} / ${d.event_date || 'TBD'}`;
+    const body = staleFollowUpBody({ stage: d.stage, artist, buyer, eventDate: d.event_date, city });
+    try {
+      createOutlookDraft({ to_email, subject, body });
+      drafts++;
+      counts.drafts = (counts.drafts || 0) + 1;
+    } catch (e) { recordError(`stale draft ${d.id}`, e); }
+  }
+  log(`stale-deal scan: ${stale.length} stale (${byStage['Inquiry / Request']} inquiry, ${byStage['Offer In + Negotiating']} offer in) → ${urgent} new urgent, ${drafts} drafts`);
+  return { detected: stale.length, byStage, drafts, urgent };
 }
 
 // ─── regenerate grids ─────────────────────────────────────────────────────
@@ -576,6 +691,7 @@ function regenerateGrids() {
   }
 }
 let gridsResult = null;
+let staleResult = { detected: 0, byStage: {}, drafts: 0, urgent: 0 };
 
 // ─── finalize ─────────────────────────────────────────────────────────────
 let finalizeRan = false;
@@ -618,7 +734,13 @@ function finalize(extra = {}) {
   console.log(`Rolodex last_contact:   ${counts.buyerContacts || 0}`);
   console.log(`Target list updates:    ${counts.targets || 0}`);
   console.log(`Campaign replies:       ${counts.campaignReplies || 0}`);
-  console.log(`Pipeline enrichments:   ${counts.enrichments || 0}`);
+  console.log(`Pipeline enrichments:   ${counts.enrichments || 0}    (HGR fields extracted)`);
+  console.log(`Pipeline auto-confirmed:${counts.autoConfirmed || 0}`);
+  if (staleResult?.detected !== undefined) {
+    const inq = staleResult.byStage['Inquiry / Request'] || 0;
+    const off = staleResult.byStage['Offer In + Negotiating'] || 0;
+    console.log(`Stale deals detected:   ${staleResult.detected}    (${inq} inquiry, ${off} offer in) → ${staleResult.urgent} new urgent, ${staleResult.drafts} drafts`);
+  }
   console.log(`Skipped:                ${counts.skipped}`);
   console.log(`Grids regenerated:      ${gridsResult?.ok ? 'yes' : (gridsResult ? 'FAILED (' + gridsResult.reason + ')' : 'not run')}`);
   if (intelligence?.summary) {
@@ -655,6 +777,14 @@ function finalize(extra = {}) {
     await probeProcessedEmails(supabase);
   } catch (e) { recordError('init', e); finalize({ status: 'ERROR', reason: 'init' }); process.exit(1); }
 
+  // Stale-deal detection runs BEFORE we read today's emails so the urgent
+  // queue is fresh and any new replies that come in below get processed
+  // against an up-to-date state.
+  try {
+    const artistsRows = await loadArtistsLite(supabase);
+    staleResult = await detectStaleDeals(supabase, artistsRows);
+  } catch (e) { recordError('stale-detect', e); }
+
   let emails = [];
   try { log('scraping Outlook…'); emails = await scrapeOutlook(); counts.emails = emails.length; log(`scraped ${emails.length} emails`); }
   catch (e) { recordError('scrape', e); }
@@ -685,6 +815,24 @@ function finalize(extra = {}) {
           const { data, error } = await supabase.from('shows').insert(row).select().single();
           if (error) { recordError(`show ${row.artist_slug}`, error); continue; }
           inserted.shows.push(data); counts.shows++;
+
+          // Smarter show extraction: if a matching pipeline row exists for
+          // this artist+date, the offer just graduated to confirmed —
+          // delete the pipeline row so the kanban shows the deal in the
+          // Confirmed + Advancing column instead of leaving it stuck in
+          // Offer In + Negotiating.
+          try {
+            const { data: matchPipe } = await supabase
+              .from('pipeline').select('id, stage')
+              .eq('artist_slug', row.artist_slug).eq('event_date', row.event_date).limit(1);
+            if (matchPipe && matchPipe.length > 0) {
+              const { error: derr } = await supabase.from('pipeline').delete().eq('id', matchPipe[0].id);
+              if (!derr) {
+                counts.autoConfirmed = (counts.autoConfirmed || 0) + 1;
+                log(`Pipeline deal auto-confirmed: ${row.artist_slug} ${row.event_date}`);
+              }
+            }
+          } catch (e) { recordError(`auto-confirm ${row.artist_slug}`, e); }
         } else if (kind === 'pipeline') {
           if (!row.event_date) { skipped.push(`pipeline no-date: ${row.artist_slug}`); counts.skipped++; continue; }
           if (await existsPipeline(supabase, row.artist_slug, row.event_date, row.stage)) { skipped.push(`pipeline dup: ${row.artist_slug} ${row.event_date} ${row.stage}`); counts.skipped++; continue; }
@@ -805,11 +953,11 @@ function finalize(extra = {}) {
     }
   }
 
-  // ─── deal extractions — enrich matching pipeline rows with HGR fields ─
-  if (intelligence?.deal_extractions?.length) {
+  // ─── pipeline updates — enrich matching pipeline rows with HGR fields ─
+  if (intelligence?.pipeline_updates?.length) {
     const OFFER_TYPES_OK = new Set(['TBD', 'Landed', 'All In', 'Fee+Flights']);
     const EVENT_TYPES_OK = new Set(['Headline', 'Direct Support', 'Festival Stage', 'B2B', 'Club Night']);
-    for (const ex of intelligence.deal_extractions) {
+    for (const ex of intelligence.pipeline_updates) {
       if (!ex.artist_slug || !ex.event_date) continue;
       if (!validSlugs.has(ex.artist_slug)) continue;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(ex.event_date)) continue;
@@ -837,7 +985,7 @@ function finalize(extra = {}) {
         if (uerr) { recordError(`deal enrich ${ex.artist_slug} ${ex.event_date}`, uerr); continue; }
         counts.enrichments = (counts.enrichments || 0) + 1;
         log(`  ↑ Enriched pipeline ${ex.artist_slug} ${ex.event_date}: ${Object.keys(patch).join(', ')}`);
-      } catch (e) { recordError(`deal_extraction`, e); }
+      } catch (e) { recordError(`pipeline_update`, e); }
     }
   }
 
