@@ -705,7 +705,9 @@ function HGRSummary({ deal }) {
   );
 }
 
-function DealCard({ deal, col, artistNames, onCardClick, dragProvided, dragSnapshot }) {
+const ALL_STAGE_OPTIONS = ['Inquiry / Request', 'Offer In + Negotiating', 'Confirmed', 'Advancing', 'Settled'];
+
+function DealCard({ deal, col, artistNames, onCardClick, onStageChange, dragProvided, dragSnapshot }) {
   const artistName = artistNames[deal.artist_slug] || deal.artist_slug;
   const tableName = deal._source || (deal.stage ? 'pipeline' : 'shows');
   const stage = deal.stage || deal.deal_type;
@@ -776,6 +778,21 @@ function DealCard({ deal, col, artistNames, onCardClick, dragProvided, dragSnaps
       {col.id === 'offer'     && <OfferBody     deal={deal} daysSinceActivity={daysSinceActivity} />}
       {col.id === 'confirmed' && <ConfirmedBody deal={deal} />}
       {col.id === 'settled'   && <SettledBody   deal={deal} />}
+
+      {/* Stage dropdown — fallback when drag-and-drop feels fiddly */}
+      {onStageChange && (
+        <div className="mt-3 pt-3 border-t border-gray-800" onClick={e => e.stopPropagation()}>
+          <label className="text-gray-600 text-[10px] uppercase tracking-wider font-semibold block mb-1">Stage</label>
+          <select
+            value={stage || ''}
+            onChange={e => { e.stopPropagation(); onStageChange(deal, e.target.value); }}
+            onMouseDown={e => e.stopPropagation()}
+            className="w-full bg-gray-950 border border-gray-800 hover:border-gray-700 focus:border-indigo-600 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:outline-none"
+          >
+            {ALL_STAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      )}
 
       {/* Quick Notes — on all cards */}
       <div className="mt-3 pt-3 border-t border-gray-800" onClick={e => e.stopPropagation()}>
@@ -939,9 +956,11 @@ function SettledBody({ deal }) {
 }
 
 // ── KANBAN COLUMN ─────────────────────────────────────────────────────────────
-function KanbanColumn({ col, deals, artistNames, onCardClick }) {
+function KanbanColumn({ col, deals, artistNames, onCardClick, onStageChange }) {
+  // droppableId is the exact stage name ("Inquiry / Request" etc.) so the
+  // onDragEnd handler can use destination.droppableId directly as the new stage.
   return (
-    <Droppable droppableId={col.id}>
+    <Droppable droppableId={col.defaultStageOnDrop}>
       {(droppableProvided, dropSnapshot) => (
         <div
           ref={droppableProvided.innerRef}
@@ -975,6 +994,7 @@ function KanbanColumn({ col, deals, artistNames, onCardClick }) {
                       col={col}
                       artistNames={artistNames}
                       onCardClick={onCardClick}
+                      onStageChange={onStageChange}
                       dragProvided={dragProvided}
                       dragSnapshot={dragSnapshot}
                     />
@@ -1003,122 +1023,94 @@ export default function Pipeline() {
 
   function handleCardClick(deal) { setSelectedDeal(deal); }
 
-  // ── DRAG AND DROP ────────────────────────────────────────────────────────
-  async function handleDragEnd(result) {
-    const { source, destination, draggableId } = result;
-    if (!destination) return;
-    if (source.droppableId === destination.droppableId && source.index === destination.index) return;
+  // ── STAGE CHANGE (used by DnD drops AND the per-card dropdown) ─────────
+  // One source of truth for "this deal just changed stage". Honors the
+  // two-table schema: Inquiry / Request + Offer In + Negotiating live in
+  // the `pipeline` table (.stage). Confirmed / Advancing / Settled live
+  // in the `shows` table (.deal_type). Crossing that boundary means
+  // INSERT into the new table + DELETE from the old; staying in one
+  // table is a simple UPDATE. Optimistic UI with rollback on failure.
+  const PIPELINE_STAGES_SET = new Set(['Inquiry / Request', 'Offer In + Negotiating']);
+  async function changeStage(deal, newStage) {
+    const srcTable = deal._source || (deal.stage ? 'pipeline' : 'shows');
+    const dstTable = PIPELINE_STAGES_SET.has(newStage) ? 'pipeline' : 'shows';
+    const currentStage = deal.stage || deal.deal_type;
+    if (currentStage === newStage) return;
 
-    const srcCol = COLUMNS.find(c => c.id === source.droppableId);
-    const dstCol = COLUMNS.find(c => c.id === destination.droppableId);
-    if (!srcCol || !dstCol) return;
-
-    const srcTable = srcCol.source;   // 'pipeline' | 'shows'
-    const dstTable = dstCol.source;
-    const newStage = dstCol.defaultStageOnDrop || dstCol.stages[0];
-
-    // Find the moving deal
-    const srcList = srcTable === 'pipeline' ? pipelineDeals : shows;
-    const moving  = srcList.find(d => String(d.id) === draggableId);
-    if (!moving) return;
-
-    // Snapshot for rollback
     const beforeP = pipelineDeals;
     const beforeS = shows;
 
-    // Build updated destination list (optimistically)
-    const destListAll = dstTable === 'pipeline' ? pipelineDeals : shows;
-    const destColDeals = destListAll
-      .filter(d => dstCol.stages.includes(d.stage) || dstCol.stages.includes(d.deal_type))
-      .filter(d => String(d.id) !== draggableId);
-    const movedShaped = dstTable === 'pipeline'
-      ? { ...moving, stage: newStage, deal_type: null, _source: 'pipeline' }
-      : { ...moving, stage: null, deal_type: newStage, _source: 'shows' };
-    destColDeals.splice(destination.index, 0, movedShaped);
-
-    // Optimistic local update
-    if (srcTable === dstTable) {
-      const otherDeals = destListAll.filter(d =>
-        !dstCol.stages.includes(d.stage) &&
-        !dstCol.stages.includes(d.deal_type) &&
-        String(d.id) !== draggableId
-      );
-      const nextAll = [...otherDeals, ...destColDeals.map((d, i) => ({ ...d, sort_order: i }))];
-      if (srcTable === 'pipeline') setPipelineDeals(nextAll); else setShows(nextAll);
-    } else {
-      // Cross-table: remove from source list, add to dest list
-      const srcOther = srcList.filter(d => String(d.id) !== draggableId);
-      const dstOther = destListAll.filter(d =>
-        !dstCol.stages.includes(d.stage) &&
-        !dstCol.stages.includes(d.deal_type)
-      );
-      const dstNext = [...dstOther, ...destColDeals.map((d, i) => ({ ...d, sort_order: i }))];
-      if (srcTable === 'pipeline') { setPipelineDeals(srcOther); setShows(dstNext); }
-      else                         { setShows(srcOther); setPipelineDeals(dstNext); }
-    }
-
-    // Persist
     try {
       if (srcTable === dstTable) {
-        // Same-table — UPDATE the moved row (stage if cross-column, always sort_order)
-        // Plus reindex sort_order for all cards in the destination column.
-        const updates = destColDeals.map((d, i) => ({
-          id: d.id,
-          sort_order: i,
-          ...(srcTable === 'pipeline' ? { stage: newStage } : { deal_type: newStage }),
-        }));
-        // Supabase upsert by primary key (id is PK)
-        const { error } = await supabase.from(srcTable).upsert(updates, { onConflict: 'id' });
+        // Same table — simple UPDATE
+        const patch = dstTable === 'pipeline' ? { stage: newStage } : { deal_type: newStage };
+        // Optimistic local patch first
+        const listSetter = dstTable === 'pipeline' ? setPipelineDeals : setShows;
+        listSetter(prev => prev.map(d => d.id === deal.id ? { ...d, ...patch } : d));
+        const { error } = await supabase.from(dstTable).update(patch).eq('id', deal.id);
         if (error) throw error;
       } else {
-        // Cross-table — DELETE from source, INSERT into destination table.
-        // The new row gets a new id.
-        const payload = { ...moving };
+        // Cross-table — INSERT dest, DELETE src. Remap fields that differ.
+        const srcRow = (srcTable === 'pipeline' ? pipelineDeals : shows).find(d => d.id === deal.id);
+        if (!srcRow) throw new Error('Deal not found in source list');
+        const payload = { ...srcRow };
         delete payload.id;
         delete payload.created_at;
         delete payload._source;
         if (dstTable === 'pipeline') {
           payload.stage = newStage;
-          delete payload.deal_type;
-          delete payload.status; // shows.status isn't on pipeline schema
-          delete payload.hold_number;
+          delete payload.deal_type; delete payload.status; delete payload.hold_number;
+          if (!payload.fee_offered && payload.fee) payload.fee_offered = payload.fee;
+          delete payload.fee;
+          if (!payload.market && payload.city) payload.market = payload.city;
+          delete payload.city;
+          if (!payload.buyer_company && payload.promoter) payload.buyer_company = payload.promoter;
+          delete payload.promoter;
         } else {
           payload.deal_type = newStage;
           payload.status = newStage;
           delete payload.stage;
-          delete payload.fee_offered; delete payload.fee_target;
-          if (moving.fee_offered && !moving.fee) payload.fee = moving.fee_offered;
-          delete payload.next_action; delete payload.manager_cc;
-          delete payload.buyer_company; delete payload.buyer;
-          if (!payload.promoter) payload.promoter = moving.buyer_company || moving.buyer || null;
+          delete payload.fee_target; delete payload.next_action; delete payload.manager_cc;
+          if (!payload.fee && payload.fee_offered) payload.fee = payload.fee_offered;
+          delete payload.fee_offered;
+          if (!payload.city && payload.market) payload.city = payload.market;
           delete payload.market;
-          if (!payload.city) payload.city = moving.market || null;
+          if (!payload.promoter && (payload.buyer_company || payload.buyer)) payload.promoter = payload.buyer_company || payload.buyer;
+          delete payload.buyer; delete payload.buyer_company;
+          // Pipeline-only fields that shows doesn't have
+          ['walkout_potential','age_restriction','buyer_phone','buyer_email','radius_clause','set_time','bonus_structure','capacity','event_type','hotel_included','ground_included','rider_included'].forEach(k => { delete payload[k]; });
         }
-        payload.sort_order = destination.index;
+
+        // Optimistic: remove from src list immediately
+        if (srcTable === 'pipeline') setPipelineDeals(prev => prev.filter(d => d.id !== deal.id));
+        else setShows(prev => prev.filter(d => d.id !== deal.id));
 
         const { data: inserted, error: insErr } = await supabase.from(dstTable).insert(payload).select().single();
         if (insErr) throw insErr;
-        const { error: delErr } = await supabase.from(srcTable).delete().eq('id', moving.id);
-        if (delErr) { /* best-effort — log but don't rollback the successful insert */ console.error('dst insert ok, src delete failed:', delErr.message); }
+        const { error: delErr } = await supabase.from(srcTable).delete().eq('id', deal.id);
+        if (delErr) console.error('insert ok, delete failed:', delErr.message);
 
-        // Patch local state: swap the temporary shaped row for the real inserted row
-        const swap = (list) => list.map(d => d.id === moving.id ? { ...inserted, _source: dstTable } : d);
-        if (dstTable === 'pipeline') setPipelineDeals(prev => swap(prev));
-        else setShows(prev => swap(prev));
-
-        // Reindex the destination column (bulk)
-        const destColFinal = destColDeals.map((d, i) => ({
-          id: d.id === moving.id ? inserted.id : d.id,
-          sort_order: i,
-        }));
-        await supabase.from(dstTable).upsert(destColFinal, { onConflict: 'id' });
+        const taggedNew = { ...inserted, _source: dstTable };
+        if (dstTable === 'pipeline') setPipelineDeals(prev => [...prev, taggedNew]);
+        else setShows(prev => [...prev, taggedNew]);
       }
     } catch (err) {
-      // Roll back — restore previous local state so the user sees the failure
       setPipelineDeals(beforeP);
       setShows(beforeS);
-      setError(`Drag save failed: ${err.message || err}`);
+      setError(`Stage change failed: ${err.message || err}`);
     }
+  }
+
+  // ── DRAG-AND-DROP HANDLER ────────────────────────────────────────────
+  // droppableId == exact stage name. destination.droppableId IS the new stage.
+  async function handleDragEnd(result) {
+    const { source, destination, draggableId } = result;
+    if (!destination) return;
+    if (source.droppableId === destination.droppableId) return;
+    const newStage = destination.droppableId;
+    const deal = [...pipelineDeals, ...shows].find(d => String(d.id) === draggableId);
+    if (!deal) return;
+    await changeStage(deal, newStage);
   }
 
   function handleDealUpdated(updated) {
@@ -1292,6 +1284,7 @@ export default function Pipeline() {
                   deals={col.deals}
                   artistNames={artistNames}
                   onCardClick={handleCardClick}
+                  onStageChange={changeStage}
                 />
               ))}
             </div>
