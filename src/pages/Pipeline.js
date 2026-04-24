@@ -707,7 +707,7 @@ function HGRSummary({ deal }) {
 
 const ALL_STAGE_OPTIONS = ['Inquiry / Request', 'Offer In + Negotiating', 'Confirmed', 'Advancing', 'Settled'];
 
-function DealCard({ deal, col, artistNames, onCardClick, onStageChange, dragProvided, dragSnapshot }) {
+function DealCard({ deal, col, artistNames, onCardClick, onStageChange, onDelete, dragProvided, dragSnapshot }) {
   const artistName = artistNames[deal.artist_slug] || deal.artist_slug;
   const tableName = deal._source || (deal.stage ? 'pipeline' : 'shows');
   const stage = deal.stage || deal.deal_type;
@@ -751,9 +751,23 @@ function DealCard({ deal, col, artistNames, onCardClick, onStageChange, dragProv
       {...(dragProvided?.dragHandleProps || {})}
       style={dragProvided?.draggableProps?.style}
       onClick={() => onCardClick(deal)}
-      className={`bg-gray-900 border ${borderClass} rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-800/40 transition-transform transition-colors cursor-grab active:cursor-grabbing ${dragStyle}`}
+      className={`group relative bg-gray-900 border ${borderClass} rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-800/40 transition-transform transition-colors cursor-grab active:cursor-grabbing ${dragStyle}`}
     >
-      <div className="flex items-start gap-2 mb-2">
+      {/* Subtle delete — shown only on hover, top-right */}
+      {onDelete && (
+        <button
+          type="button"
+          aria-label="Delete deal"
+          title="Delete this deal"
+          onMouseDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); onDelete(deal); }}
+          className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-md text-gray-600 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-950/40 transition-opacity transition-colors text-sm leading-none"
+        >
+          ×
+        </button>
+      )}
+
+      <div className="flex items-start gap-2 mb-2 pr-6">
         <span
           className="text-gray-600 text-base select-none pointer-events-none"
           title="Drag anywhere on the card to reorder or change stage"
@@ -956,7 +970,7 @@ function SettledBody({ deal }) {
 }
 
 // ── KANBAN COLUMN ─────────────────────────────────────────────────────────────
-function KanbanColumn({ col, deals, artistNames, onCardClick, onStageChange }) {
+function KanbanColumn({ col, deals, artistNames, onCardClick, onStageChange, onDelete }) {
   // droppableId is the exact stage name ("Inquiry / Request" etc.) so the
   // onDragEnd handler can use destination.droppableId directly as the new stage.
   return (
@@ -995,6 +1009,7 @@ function KanbanColumn({ col, deals, artistNames, onCardClick, onStageChange }) {
                       artistNames={artistNames}
                       onCardClick={onCardClick}
                       onStageChange={onStageChange}
+                      onDelete={onDelete}
                       dragProvided={dragProvided}
                       dragSnapshot={dragSnapshot}
                     />
@@ -1022,6 +1037,26 @@ export default function Pipeline() {
   const [selectedDeal, setSelectedDeal] = useState(null);
 
   function handleCardClick(deal) { setSelectedDeal(deal); }
+
+  // Delete a deal. Confirms via native dialog, then DELETE from whichever
+  // table the row lives in (pipeline for stages 1-2, shows for 3-5).
+  // Local state is updated optimistically; an error rolls back.
+  async function handleDelete(deal) {
+    if (!deal?.id) return;
+    const label = (artistNames[deal.artist_slug] || deal.artist_slug || 'this deal').toString();
+    if (!window.confirm(`Delete this deal?\n\n${label} — ${deal.event_date || 'no date'}\n\nThis cannot be undone.`)) return;
+    const table = deal._source || (deal.stage ? 'pipeline' : 'shows');
+    const beforeP = pipelineDeals;
+    const beforeS = shows;
+    if (table === 'pipeline') setPipelineDeals(prev => prev.filter(d => d.id !== deal.id));
+    else                      setShows(prev => prev.filter(d => d.id !== deal.id));
+    const { error } = await supabase.from(table).delete().eq('id', deal.id);
+    if (error) {
+      setPipelineDeals(beforeP);
+      setShows(beforeS);
+      setError(`Delete failed: ${error.message}`);
+    }
+  }
 
   // ── STAGE CHANGE (used by DnD drops AND the per-card dropdown) ─────────
   // One source of truth for "this deal just changed stage". Honors the
@@ -1285,6 +1320,7 @@ export default function Pipeline() {
                   artistNames={artistNames}
                   onCardClick={handleCardClick}
                   onStageChange={changeStage}
+                  onDelete={handleDelete}
                 />
               ))}
             </div>
