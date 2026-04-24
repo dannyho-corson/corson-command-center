@@ -36,7 +36,9 @@ const START = Date.now();
 
 const SCRAPE_TARGET = 30;
 const SCRAPE_MAX = 60;
-const SCROLL_MAX_ITERS = 20;
+const SCROLL_MAX_ITERS = 40;          // was 20 — Outlook's virtualizer can need many passes
+const SCROLL_DELAY_MS = 900;           // per-iteration render wait
+const STALL_LIMIT = 5;                 // stop after this many no-growth iters
 
 const CLAUDE_MODEL = 'claude-opus-4-7';
 
@@ -143,6 +145,11 @@ function scrapeOutlook() {
         }
         var firstRow = getRows()[0];
         if (!firstRow) { window._corson.progress = 'no mail rows'; window._corson.done = true; return; }
+
+        // Find the scrollable ancestor that actually holds the list —
+        // overflow auto/scroll AND scrollHeight > clientHeight (so there's
+        // room to scroll). Log which element we picked so failures are
+        // debuggable from the Node side.
         var scrollable = firstRow;
         while (scrollable && scrollable !== document.body) {
           var cs = getComputedStyle(scrollable);
@@ -150,27 +157,47 @@ function scrapeOutlook() {
           scrollable = scrollable.parentElement;
         }
         if (!scrollable || scrollable === document.body) scrollable = document.scrollingElement || document.documentElement;
+        var scrollableDesc = (scrollable.tagName || '?') + '.' + String(scrollable.className || '').slice(0, 40) + ' sh=' + scrollable.scrollHeight + '/ch=' + scrollable.clientHeight;
+        window._corson.progress = 'scroll target: ' + scrollableDesc;
 
         var seen = new Map();
-        var stableScroll = 0, lastTop = -1;
+        var noGrowth = 0;
         var step = Math.max(scrollable.clientHeight - 80, 400);
         scrollable.scrollTop = 0;
-        await new Promise(function(r){ setTimeout(r, 400); });
+        await new Promise(function(r){ setTimeout(r, 500); });
 
         for (var i = 0; i < ${SCROLL_MAX_ITERS}; i++) {
+          var beforeCount = seen.size;
           getRows().forEach(function(r){
             var a = r.getAttribute('aria-label') || '';
             if (a && !seen.has(a)) seen.set(a, true);
           });
-          window._corson.progress = 'iter '+i+', seen='+seen.size;
+          var added = seen.size - beforeCount;
+          window._corson.progress = 'iter ' + i + ': seen=' + seen.size + ' new=' + added;
+
+          // Stop when we have enough
           if (seen.size >= ${SCRAPE_MAX}) break;
-          var prev = scrollable.scrollTop;
-          scrollable.scrollTop = prev + step;
-          await new Promise(function(r){ setTimeout(r, 700); });
-          if (Math.abs(scrollable.scrollTop - lastTop) < 5) { stableScroll++; if (stableScroll >= 3) break; } else stableScroll = 0;
-          lastTop = scrollable.scrollTop;
+
+          // Stop when we've truly reached the end — ${STALL_LIMIT} consecutive
+          // iters with zero new rows discovered
+          if (added === 0) {
+            noGrowth++;
+            if (noGrowth >= ${STALL_LIMIT}) { window._corson.progress = 'iter ' + i + ': stalled after ' + noGrowth + ' no-growth, seen=' + seen.size; break; }
+          } else {
+            noGrowth = 0;
+          }
+
+          // Advance the scroll. Also scroll the last visible row into
+          // view as a kick in case the container's scrollTop alone isn't
+          // triggering the virtualizer to render more.
+          var rows = getRows();
+          if (rows.length > 0) rows[rows.length - 1].scrollIntoView({ block: 'end' });
+          scrollable.scrollTop = scrollable.scrollTop + step;
+          await new Promise(function(r){ setTimeout(r, ${SCROLL_DELAY_MS}); });
         }
+        // Final snapshot — in case the last iter's scroll loaded more rows
         getRows().forEach(function(r){ var a = r.getAttribute('aria-label') || ''; if (a && !seen.has(a)) seen.set(a, true); });
+        window._corson.progress = 'done: seen=' + seen.size + ' (scrollable ' + scrollableDesc + ')';
 
         var stripRe = /^(Collapsed|Expanded|Has attachments|Replied|Forwarded|Flagged|Unread|Read|Mentioned|Important)\\s+/i;
         var labels = Array.from(seen.keys()).slice(0, ${SCRAPE_MAX});
