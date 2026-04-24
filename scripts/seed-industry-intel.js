@@ -53,7 +53,9 @@ const SEED = [
   for (const row of SEED) {
     const { data: existing } = await supabase.from('industry_intel').select('id').eq('category', row.category).eq('name', row.name).limit(1);
     if (existing && existing.length > 0) {
-      const { error } = await supabase.from('industry_intel').update({ ...row, updated_at: new Date().toISOString() }).eq('id', existing[0].id);
+      // updated_at omitted — set by Postgres default on insert; not all
+      // deployments have the column, and update() just needs the row id.
+      const { error } = await supabase.from('industry_intel').update(row).eq('id', existing[0].id);
       if (error) { console.error(`  ERR update ${row.name}: ${error.message}`); errs++; } else { updated++; }
     } else {
       const { error } = await supabase.from('industry_intel').insert(row);
