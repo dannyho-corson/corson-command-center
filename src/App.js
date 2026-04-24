@@ -62,13 +62,13 @@ function timeAgo(iso) {
 // ── SEVERITY BADGE ────────────────────────────────────────────────────────────
 function SeverityBadge({ severity, label }) {
   const classes = {
-    red:    'bg-red-600 text-white',
-    yellow: 'bg-yellow-600 text-white',
-    green:  'bg-emerald-600 text-white',
+    red:    'bg-rose-500/90 text-white ring-1 ring-rose-400/30',
+    yellow: 'bg-amber-500/90 text-white ring-1 ring-amber-400/30',
+    green:  'bg-emerald-500/90 text-white ring-1 ring-emerald-400/30',
   };
   return (
     <span
-      className={`px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ${classes[severity] || classes.yellow}`}
+      className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-[0.12em] ${classes[severity] || classes.yellow}`}
     >
       {label}
     </span>
@@ -96,7 +96,7 @@ function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd }) {
   return (
     <section className="mb-8">
       <div className="flex items-center gap-2 mb-4">
-        <h3 className="text-lg font-bold text-white">Urgent Issues</h3>
+        <h3 className="text-lg font-display font-semibold text-white tracking-tight">Urgent Issues</h3>
         {items.length > 0 && (
           <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{items.length}</span>
         )}
@@ -104,7 +104,7 @@ function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd }) {
       </div>
 
       {items.length === 0 ? (
-        <div className="bg-gray-900 rounded-xl border border-gray-800 px-5 py-8 text-center">
+        <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl border border-gray-800/80 shadow-card px-5 py-8 text-center">
           <p className="text-emerald-400 text-sm font-semibold">All clear — no urgent issues.</p>
         </div>
       ) : (
@@ -132,14 +132,14 @@ function UrgentIssueGroup({ group, resolving, onResolve }) {
         <div
           ref={provided.innerRef}
           {...provided.droppableProps}
-          className={`bg-gray-900 rounded-xl border overflow-hidden transition-colors ${
-            snapshot.isDraggingOver ? 'border-indigo-500 ring-2 ring-indigo-500/30' : 'border-gray-800'
+          className={`bg-gray-900/80 backdrop-blur-sm rounded-2xl border overflow-hidden shadow-card transition-all duration-300 ${
+            snapshot.isDraggingOver ? 'border-indigo-500/80 ring-2 ring-indigo-500/30 shadow-glow-indigo' : 'border-gray-800/80'
           }`}
         >
-          <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-800 bg-gray-950/60">
-            <span className="text-base leading-none">{group.emoji}</span>
-            <span className={`text-xs font-bold uppercase tracking-widest ${group.accent}`}>{group.title}</span>
-            <span className="text-gray-600 text-xs">· {group.items.length}</span>
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-800/70 bg-gray-950/40">
+            <span className="text-sm leading-none">{group.emoji}</span>
+            <span className={`text-[11px] font-bold uppercase tracking-[0.18em] ${group.accent}`}>{group.title}</span>
+            <span className="text-gray-600 text-xs font-mono">· {group.items.length}</span>
           </div>
           {group.items.length === 0 ? (
             <div className="px-5 py-4 text-gray-600 text-xs italic">drop here to set priority to {group.title}</div>
@@ -190,7 +190,7 @@ function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, drag
       {...(dragProvided?.draggableProps || {})}
       {...(dragProvided?.dragHandleProps || {})}
       style={dragProvided?.draggableProps?.style}
-      className={`flex items-start gap-4 px-5 py-4 ${isLast ? '' : 'border-b border-gray-800'} ${rowBg} transition-transform ${dragStyle} select-none cursor-grab active:cursor-grabbing`}
+      className={`flex items-start gap-4 px-5 py-4 ${isLast ? '' : 'border-b border-gray-800/60'} ${rowBg} hover:bg-gray-800/30 transition-all duration-200 ease-out ${dragStyle} select-none cursor-grab active:cursor-grabbing`}
     >
       <div className={`w-1 self-stretch rounded-full flex-shrink-0 ${rail}`} />
       <div className="flex flex-col gap-1 flex-1 min-w-0">
@@ -223,32 +223,28 @@ function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, drag
 
 // ── KPI CARD ──────────────────────────────────────────────────────────────────
 function KpiCard({ kpi }) {
-  const borderColors = {
-    indigo: 'border-indigo-500',
-    blue: 'border-blue-500',
-    red: 'border-red-500',
-    green: 'border-emerald-500',
-  };
-  const valueColors = {
-    indigo: 'text-indigo-400',
-    blue: 'text-blue-400',
-    red: 'text-red-400',
-    green: 'text-emerald-400',
-  };
+  const accent = {
+    indigo: { bar: 'from-indigo-500 to-indigo-400',     value: 'text-indigo-300',  glow: 'group-hover:shadow-indigo-500/15'  },
+    blue:   { bar: 'from-sky-500 to-blue-400',          value: 'text-sky-300',     glow: 'group-hover:shadow-sky-500/15'     },
+    red:    { bar: 'from-rose-500 to-red-400',          value: 'text-rose-300',    glow: 'group-hover:shadow-rose-500/15'    },
+    green:  { bar: 'from-emerald-500 to-teal-400',      value: 'text-emerald-300', glow: 'group-hover:shadow-emerald-500/15' },
+  }[kpi.color];
+
   return (
-    <div
-      className={`bg-gray-900 rounded-xl p-6 border-l-4 ${borderColors[kpi.color]} flex flex-col gap-1`}
-    >
+    <div className="group relative bg-gray-900/80 backdrop-blur-sm rounded-2xl p-6 border border-gray-800/80 shadow-card hover:shadow-card-hover hover:border-gray-700 hover:-translate-y-0.5 transition-all duration-300 ease-out overflow-hidden">
+      {/* Top accent bar */}
+      <div className={`absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r ${accent.bar} opacity-80 group-hover:opacity-100 transition-opacity`} />
+
       <div className="flex items-center justify-between">
-        <span className="text-gray-400 text-sm font-medium uppercase tracking-wider">
+        <span className="text-gray-400 text-[11px] font-semibold uppercase tracking-[0.16em]">
           {kpi.label}
         </span>
-        <span className="text-2xl">{kpi.icon}</span>
+        <span className="text-xl opacity-70 group-hover:opacity-100 transition-opacity">{kpi.icon}</span>
       </div>
-      <div className={`text-4xl font-bold mt-1 ${valueColors[kpi.color]}`}>
+      <div className={`font-display font-bold text-[2.4rem] leading-none mt-3 tabular-nums tracking-tight ${accent.value}`}>
         {kpi.value}
       </div>
-      <div className="text-gray-500 text-xs mt-1">{kpi.sub}</div>
+      <div className="text-gray-500 text-xs mt-2 leading-snug">{kpi.sub}</div>
     </div>
   );
 }
@@ -365,13 +361,13 @@ function AvailabilityWidget({ artists, shows, pipeline, loading }) {
   return (
     <section>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-bold text-white">Availability Check</h3>
+        <h3 className="text-lg font-display font-semibold text-white tracking-tight">Availability Check</h3>
         <Link to="/artists" className="text-indigo-400 text-sm hover:underline">
           View all artists →
         </Link>
       </div>
 
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-5">
+      <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl border border-gray-800/80 shadow-card p-5 space-y-5">
         {/* Controls */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -729,15 +725,17 @@ function Dashboard() {
   });
 
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: '#111827' }}>
+    <div className="min-h-screen text-white app-bg">
       <Nav />
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-7xl mx-auto px-6 py-10">
 
         {/* Page Header */}
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-white">Dashboard Overview</h2>
-          <p className="text-gray-500 text-sm mt-1">{dateStr}</p>
+        <div className="mb-9">
+          <p className="text-indigo-400/80 text-[11px] font-semibold uppercase tracking-[0.22em] mb-2">{dateStr}</p>
+          <h2 className="font-display text-[2rem] sm:text-[2.25rem] font-bold text-white tracking-tight leading-none">
+            Dashboard Overview
+          </h2>
         </div>
 
         {/* Error */}
@@ -748,27 +746,27 @@ function Dashboard() {
         )}
 
         {/* ── KPI CARDS ── */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
           {loading
             ? Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="bg-gray-900 rounded-xl p-6 border-l-4 border-gray-800 animate-pulse h-28" />
+                <div key={i} className="bg-gray-900/80 rounded-2xl p-6 border border-gray-800 animate-pulse h-32 shadow-card" />
               ))
             : kpis.map((kpi) => <KpiCard key={kpi.label} kpi={kpi} />)
           }
         </section>
 
         {/* ── MASTER TOURING GRID ── */}
-        <section className="mb-8">
-          <div className="bg-gray-900 rounded-xl border border-gray-800 px-6 py-5 flex items-center justify-between">
+        <section className="mb-10">
+          <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl border border-gray-800/80 shadow-card hover:shadow-card-hover hover:border-gray-700 transition-all duration-300 px-6 py-5 flex items-center justify-between">
             <div>
-              <h3 className="text-white font-bold text-base">Master Touring Grid</h3>
-              <p className="text-gray-500 text-xs mt-0.5">Full roster schedule — all artists, all dates</p>
+              <h3 className="text-white font-display font-semibold text-base tracking-tight">Master Touring Grid</h3>
+              <p className="text-gray-500 text-xs mt-1">Full roster schedule — all artists, all dates</p>
             </div>
             <a
               href="https://docs.google.com/spreadsheets/d/1VqKRFNzfQh_bktqZIah6OgV7djWh85LU/edit?usp=sharing"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg border border-emerald-700 text-emerald-400 hover:bg-emerald-700 hover:text-white transition-colors flex-shrink-0"
+              className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg border border-emerald-700/70 text-emerald-300 hover:bg-emerald-600 hover:text-white hover:border-emerald-500 transition-all duration-200 flex-shrink-0"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m0 0l-6.75-6.75M20.25 12l-6.75 6.75" />
@@ -782,12 +780,12 @@ function Dashboard() {
         {dueReminders.filter(r => !dismissedReminders.has(r.id)).length > 0 && (
           <section className="mb-8">
             <div className="flex items-center gap-2 mb-4">
-              <h3 className="text-lg font-bold text-white">Due Today</h3>
+              <h3 className="text-lg font-display font-semibold text-white tracking-tight">Due Today</h3>
               <span className="bg-indigo-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                 {dueReminders.filter(r => !dismissedReminders.has(r.id)).length}
               </span>
             </div>
-            <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+            <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl border border-gray-800/80 shadow-card overflow-hidden">
               {dueReminders.filter(r => !dismissedReminders.has(r.id)).map((r, i, arr) => (
                 <div
                   key={r.id}
@@ -829,10 +827,10 @@ function Dashboard() {
         {/* ── QUICK NOTES ── */}
         <section className="mb-8">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-bold text-white">Quick Notes</h3>
+            <h3 className="text-lg font-display font-semibold text-white tracking-tight">Quick Notes</h3>
             {notesSaved && <span className="text-gray-600 text-xs">Saved</span>}
           </div>
-          <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+          <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl border border-gray-800/80 shadow-card overflow-hidden focus-within:border-indigo-600/50 focus-within:shadow-glow-indigo transition-all duration-300">
             <textarea
               value={notes}
               onChange={e => handleNotesChange(e.target.value)}
@@ -857,9 +855,9 @@ function Dashboard() {
         </section>
 
         {/* ── FOOTER ── */}
-        <footer className="mt-10 pt-6 border-t border-gray-800 text-center">
-          <p className="text-gray-600 text-xs tracking-wide">
-            CORSON COMMAND CENTER · Corson Agency · Hard Techno Division · Danny Ho (Johnny Blaze)
+        <footer className="mt-12 pt-6 border-t border-gray-800/70 text-center">
+          <p className="text-gray-600 text-[11px] font-display tracking-[0.18em] uppercase">
+            Corson Command Center · Corson Agency · Hard Techno Division · Danny Ho (Johnny Blaze)
           </p>
         </footer>
       </main>

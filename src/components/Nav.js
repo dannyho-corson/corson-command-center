@@ -222,50 +222,56 @@ export default function Nav() {
 
   return (
     <>
-      <nav className="bg-gray-900 border-b border-gray-800 px-4 sm:px-6 py-4">
+      <nav className="sticky top-0 z-30 bg-gray-900/85 backdrop-blur-md border-b border-gray-800/80 px-4 sm:px-6 py-3.5">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
 
           {/* Logo + desktop links */}
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-7">
             <div className="flex items-center gap-3">
               <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                style={{ backgroundColor: '#6366F1' }}
+                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-indigo-900/40 ring-1 ring-white/10"
+                style={{ background: 'linear-gradient(135deg, #6366F1 0%, #4338CA 100%)' }}
               >
-                <span className="text-white font-bold text-sm">CC</span>
+                <span className="text-white font-display font-bold text-sm tracking-tight">CC</span>
               </div>
               <div>
                 <Link to="/" onClick={() => setOpen(false)}>
-                  <h1 className="text-white font-bold text-base sm:text-lg tracking-widest uppercase hover:text-indigo-300 transition-colors leading-tight">
+                  <h1 className="text-white font-display font-semibold text-[15px] sm:text-base tracking-[0.18em] uppercase hover:text-indigo-200 transition-colors leading-tight">
                     Corson Command Center
                   </h1>
                 </Link>
-                <p className="text-gray-500 text-xs tracking-wide hidden sm:block">
+                <p className="text-gray-500 text-[11px] tracking-wide hidden sm:block">
                   Corson Agency · Hard Techno Division
                 </p>
               </div>
             </div>
 
             {/* Desktop nav links */}
-            <div className="hidden md:flex items-center gap-1 ml-4">
-              {NAV_LINKS.map(({ to, label }) => (
-                <Link
-                  key={to}
-                  to={to}
-                  className={`relative text-sm px-3 py-1.5 rounded-lg transition-colors ${
-                    isActive(to)
-                      ? 'bg-gray-800 text-white'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                  }`}
-                >
-                  {label}
-                  {to === '/pipeline' && reminderCount > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center leading-none">
-                      {reminderCount > 9 ? '9+' : reminderCount}
-                    </span>
-                  )}
-                </Link>
-              ))}
+            <div className="hidden md:flex items-center gap-0.5 ml-2">
+              {NAV_LINKS.map(({ to, label }) => {
+                const active = isActive(to);
+                return (
+                  <Link
+                    key={to}
+                    to={to}
+                    className={`relative text-sm px-3.5 py-2 rounded-lg transition-all duration-200 ease-out ${
+                      active
+                        ? 'text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-gray-800/60'
+                    }`}
+                  >
+                    {label}
+                    {active && (
+                      <span className="absolute left-3 right-3 -bottom-[14px] h-0.5 rounded-full bg-gradient-to-r from-indigo-500 to-indigo-400" />
+                    )}
+                    {to === '/pipeline' && reminderCount > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center leading-none ring-2 ring-gray-900">
+                        {reminderCount > 9 ? '9+' : reminderCount}
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
             </div>
           </div>
 
@@ -275,23 +281,23 @@ export default function Nav() {
             {/* Search button */}
             <button
               onClick={() => setSearchOpen(true)}
-              className="flex items-center gap-2 bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 rounded-lg px-3 py-1.5 text-xs transition-colors"
+              className="flex items-center gap-2 bg-gray-800/70 border border-gray-700/70 text-gray-400 hover:text-white hover:bg-gray-800 hover:border-gray-600 rounded-lg px-3 py-1.5 text-xs transition-all duration-200"
               title="Search (⌘K)"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
               <span className="hidden sm:inline">Search</span>
-              <span className="hidden sm:inline text-gray-600">⌘K</span>
+              <span className="hidden sm:inline text-gray-600 font-mono text-[10px] px-1 py-0.5 rounded bg-gray-900/80 border border-gray-700/60">⌘K</span>
             </button>
 
             <div className="text-right hidden sm:block">
-              <p className="text-white text-sm font-semibold">Danny Ho</p>
-              <p className="text-gray-500 text-xs">dho@corsonagency.com</p>
+              <p className="text-white text-sm font-semibold leading-tight">Danny Ho</p>
+              <p className="text-gray-500 text-[11px]">dho@corsonagency.com</p>
             </div>
             <div
-              className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm text-white flex-shrink-0"
-              style={{ backgroundColor: '#6366F1' }}
+              className="w-9 h-9 rounded-full flex items-center justify-center font-display font-bold text-sm text-white flex-shrink-0 ring-1 ring-white/10 shadow-md shadow-indigo-900/30"
+              style={{ background: 'linear-gradient(135deg, #6366F1 0%, #4338CA 100%)' }}
             >
               DH
             </div>
@@ -311,7 +317,7 @@ export default function Nav() {
 
         {/* Mobile dropdown */}
         {open && (
-          <div className="md:hidden mt-3 pb-2 border-t border-gray-800 pt-3 space-y-1">
+          <div className="md:hidden mt-3 pb-2 border-t border-gray-800/80 pt-3 space-y-1">
             {NAV_LINKS.map(({ to, label }) => (
               <Link
                 key={to}
@@ -319,7 +325,7 @@ export default function Nav() {
                 onClick={() => setOpen(false)}
                 className={`block px-4 py-2.5 rounded-lg text-sm transition-colors ${
                   isActive(to)
-                    ? 'bg-gray-800 text-white'
+                    ? 'bg-indigo-600/20 text-white border-l-2 border-indigo-500 pl-[14px]'
                     : 'text-gray-400 hover:text-white hover:bg-gray-800'
                 }`}
               >

@@ -28,12 +28,12 @@ export default function IndustryIntelWidget() {
   }, []);
 
   if (loading) {
-    return <div className="bg-gray-900 rounded-xl p-6 border border-gray-800 animate-pulse h-48" />;
+    return <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl shadow-card p-6 border border-gray-800/80 animate-pulse h-48" />;
   }
 
   if (error) {
     return (
-      <div className="bg-gray-900 rounded-xl p-6 border border-gray-800 text-sm text-gray-400">
+      <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl shadow-card p-6 border border-gray-800/80 text-sm text-gray-400">
         <div className="font-bold text-white mb-1">Industry Intel</div>
         <div>Run <code className="text-emerald-400">sql/briefing_intelligence.sql</code> in Supabase to enable this widget.</div>
       </div>
@@ -42,7 +42,7 @@ export default function IndustryIntelWidget() {
 
   if (rows.length === 0) {
     return (
-      <div className="bg-gray-900 rounded-xl p-6 border border-gray-800 text-sm text-gray-400">
+      <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl shadow-card p-6 border border-gray-800/80 text-sm text-gray-400">
         <div className="font-bold text-white mb-1">Industry Intel</div>
         <div>No data yet. Run <code className="text-emerald-400">node scripts/seed-industry-intel.js</code> to seed.</div>
       </div>
@@ -55,10 +55,10 @@ export default function IndustryIntelWidget() {
   const trends          = rows.filter(r => r.category === 'trend').slice(0, 4);
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+    <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl shadow-card border border-gray-800/80 overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
         <div>
-          <h3 className="text-white font-bold text-base">Industry Intel</h3>
+          <h3 className="text-white font-display font-semibold text-base tracking-tight">Industry Intel</h3>
           <p className="text-gray-500 text-xs mt-0.5">Festival coverage · key buyers · scene pulse</p>
         </div>
         <span className="text-gray-500 text-xs">{rows.length} items</span>

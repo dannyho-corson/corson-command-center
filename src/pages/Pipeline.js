@@ -751,7 +751,7 @@ function DealCard({ deal, col, artistNames, onCardClick, onStageChange, onDelete
       {...(dragProvided?.dragHandleProps || {})}
       style={dragProvided?.draggableProps?.style}
       onClick={() => onCardClick(deal)}
-      className={`group relative bg-gray-900 border ${borderClass} rounded-xl p-4 hover:border-indigo-500/50 hover:bg-gray-800/40 transition-transform transition-colors cursor-grab active:cursor-grabbing ${dragStyle}`}
+      className={`group relative bg-gray-900/90 border ${borderClass} rounded-xl px-3.5 pt-3 pb-3 shadow-soft hover:border-indigo-500/60 hover:bg-gray-800/50 hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${dragStyle}`}
     >
       {/* Subtle delete — shown only on hover, top-right */}
       {onDelete && (
@@ -761,7 +761,7 @@ function DealCard({ deal, col, artistNames, onCardClick, onStageChange, onDelete
           title="Delete this deal"
           onMouseDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); onDelete(deal); }}
-          className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-md text-gray-600 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-950/40 transition-opacity transition-colors text-sm leading-none"
+          className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-md text-gray-600 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-950/40 transition-all duration-200 text-sm leading-none"
         >
           ×
         </button>
@@ -769,20 +769,20 @@ function DealCard({ deal, col, artistNames, onCardClick, onStageChange, onDelete
 
       <div className="flex items-start gap-2 mb-2 pr-6">
         <span
-          className="text-gray-600 text-base select-none pointer-events-none"
+          className="text-gray-700 text-base select-none pointer-events-none"
           title="Drag anywhere on the card to reorder or change stage"
         >⠿</span>
         <Link
           to={`/artists/${deal.artist_slug}`}
           onClick={e => e.stopPropagation()}
-          className="text-white font-bold text-base hover:text-indigo-300 transition-colors flex-1 min-w-0 truncate"
+          className="text-white font-display font-semibold text-[15px] hover:text-indigo-300 transition-colors flex-1 min-w-0 truncate tracking-tight"
         >
           {artistName}
         </Link>
       </div>
 
       {stage && (
-        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded border inline-block mb-3 ${col.headerBg} ${col.headerText} border-current/30`}>
+        <span className={`text-[10px] font-semibold uppercase tracking-[0.12em] px-2 py-0.5 rounded-md inline-block mb-2.5 ${col.headerBg} ${col.headerText} ring-1 ring-current/20`}>
           {stage}
         </span>
       )}
@@ -893,13 +893,13 @@ function OfferBody({ deal, daysSinceActivity }) {
       )}
 
       {fee && (
-        <div className="pt-2 flex items-center gap-2 flex-wrap">
-          <span className="text-emerald-400 font-bold text-lg">{fee}</span>
+        <div className="pt-2.5 flex items-baseline gap-2 flex-wrap">
+          <span className="text-emerald-300 font-display font-bold text-[1.55rem] leading-none tabular-nums tracking-tight">{fee}</span>
           {Number.isFinite(Number(walkout)) && Number(walkout) > 0 && (
-            <span className="text-[11px] text-emerald-300/80">/ walkout ~{walkout}</span>
+            <span className="text-[11px] text-emerald-300/70 font-mono">/ walkout ~{walkout}</span>
           )}
           {deal.deal_type && (
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border border-gray-700 text-gray-300">
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md border border-gray-700/70 text-gray-400 uppercase tracking-wider ml-auto">
               {deal.deal_type}
             </span>
           )}
@@ -944,8 +944,8 @@ function ConfirmedBody({ deal }) {
         </div>
       )}
       {promoter && <div><span className="text-gray-600 mr-2">Promo</span><span className="text-gray-300 truncate">{promoter}</span></div>}
-      {fee && <div className="text-emerald-400 font-bold pt-1">{fee}</div>}
-      <div className="text-[10px] font-semibold uppercase tracking-wider mt-1">
+      {fee && <div className="text-emerald-300 font-display font-bold text-[1.4rem] leading-none tabular-nums tracking-tight pt-2">{fee}</div>}
+      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] mt-1.5">
         <span className={showWeek ? 'text-red-400' : 'text-teal-300'}>{statusLabel}</span>
       </div>
     </div>
@@ -963,8 +963,8 @@ function SettledBody({ deal }) {
       {(city || venue) && (
         <div><span className="text-gray-600 mr-2">Where</span><span className="text-gray-400 truncate">{[city, venue].filter(Boolean).join(' · ')}</span></div>
       )}
-      {fee && <div className="text-gray-300">{fee}</div>}
-      <span className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 mt-1">SETTLED</span>
+      {fee && <div className="text-gray-300 font-mono tabular-nums text-sm pt-1">{fee}</div>}
+      <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-md bg-gray-800 text-gray-500 mt-1.5 tracking-[0.14em]">SETTLED</span>
     </div>
   );
 }
@@ -980,16 +980,16 @@ function KanbanColumn({ col, deals, artistNames, onCardClick, onStageChange, onD
           ref={droppableProvided.innerRef}
           {...droppableProvided.droppableProps}
           style={{ flex: col.flex || 1 }}
-          className={`min-w-[240px] flex flex-col rounded-xl border-t-2 ${col.accent} bg-gray-900/50 transition-colors ${
-            dropSnapshot.isDraggingOver ? 'ring-2 ring-indigo-500/50 bg-gray-900/80' : ''
+          className={`min-w-[240px] flex flex-col rounded-2xl border-t-2 ${col.accent} bg-gray-900/40 backdrop-blur-sm shadow-card transition-all duration-300 ${
+            dropSnapshot.isDraggingOver ? 'ring-2 ring-indigo-500/50 bg-gray-900/80 shadow-glow-indigo' : ''
           }`}
         >
-          <div className={`px-4 py-3 rounded-t-xl flex items-center justify-between ${col.headerBg}`}>
+          <div className={`px-4 py-3 rounded-t-2xl flex items-center justify-between ${col.headerBg}`}>
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${col.dot}`} />
-              <span className={`text-sm font-bold uppercase tracking-wider ${col.headerText}`}>{col.label}</span>
+              <div className={`w-2 h-2 rounded-full ${col.dot} shadow-sm`} />
+              <span className={`text-[11px] font-display font-semibold uppercase tracking-[0.16em] ${col.headerText}`}>{col.label}</span>
             </div>
-            <span className="text-gray-500 text-xs font-semibold bg-gray-800 px-2 py-0.5 rounded-full">
+            <span className="text-gray-400 text-[11px] font-mono font-semibold bg-gray-900/70 ring-1 ring-gray-700/50 px-2 py-0.5 rounded-full tabular-nums">
               {deals.length}
             </span>
           </div>
@@ -1220,26 +1220,26 @@ export default function Pipeline() {
   const totalDeals = pipelineDeals.length + shows.length;
 
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: '#111827' }}>
+    <div className="min-h-screen text-white app-bg">
       <Nav />
 
       {/* ── BREADCRUMB ── */}
       <div className="max-w-full px-6 pt-6">
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <Link to="/" className="hover:text-white transition-colors">Dashboard</Link>
-          <span>/</span>
+        <div className="flex items-center gap-2 text-xs text-gray-500 font-medium tracking-wide">
+          <Link to="/" className="hover:text-indigo-300 transition-colors">Dashboard</Link>
+          <span className="text-gray-700">/</span>
           <span className="text-gray-300">Deal Pipeline</span>
         </div>
       </div>
 
-      <main className="px-6 py-6">
+      <main className="px-6 py-7">
 
         {/* ── HEADER + FILTER ── */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-7">
           <div>
-            <h2 className="text-2xl font-bold text-white">Deal Pipeline Board</h2>
-            <p className="text-gray-500 text-sm mt-1">
-              {loading ? 'Loading…' : `${totalDeals} total deals across ${COLUMNS.length} stages`}
+            <h2 className="text-[2rem] sm:text-[2.25rem] font-display font-bold text-white tracking-tight leading-none">Deal Pipeline Board</h2>
+            <p className="text-gray-500 text-sm mt-2">
+              {loading ? 'Loading…' : <><span className="text-gray-300 font-mono tabular-nums">{totalDeals}</span> total deals across <span className="text-gray-300 font-mono">{COLUMNS.length}</span> stages</>}
             </p>
           </div>
 
@@ -1248,7 +1248,7 @@ export default function Pipeline() {
             <select
               value={filterSlug}
               onChange={(e) => setFilterSlug(e.target.value)}
-              className="bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 min-w-[180px]"
+              className="bg-gray-900/80 border border-gray-700/80 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 min-w-[180px] transition-all duration-200"
             >
               <option value="">All Artists</option>
               {artists.map((a) => (
@@ -1257,8 +1257,8 @@ export default function Pipeline() {
             </select>
             <button
               onClick={() => setShowAddDeal(true)}
-              className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg text-white whitespace-nowrap"
-              style={{ backgroundColor: '#6366F1' }}
+              className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg text-white whitespace-nowrap shadow-md shadow-indigo-900/40 hover:shadow-lg hover:shadow-indigo-900/50 hover:-translate-y-0.5 transition-all duration-200 ease-out"
+              style={{ background: 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)' }}
             >
               + Add Deal
             </button>
