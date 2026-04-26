@@ -227,24 +227,33 @@ export default function Nav() {
 
           {/* Logo + desktop links */}
           <div className="flex items-center gap-7">
-            <div className="flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-indigo-900/40 ring-1 ring-white/10"
-                style={{ background: 'linear-gradient(135deg, #6366F1 0%, #4338CA 100%)' }}
-              >
-                <span className="text-white font-display font-bold text-sm tracking-tight">CC</span>
-              </div>
-              <div>
-                <Link to="/" onClick={() => setOpen(false)}>
-                  <h1 className="text-white font-display font-semibold text-[15px] sm:text-base tracking-[0.18em] uppercase hover:text-indigo-200 transition-colors leading-tight">
-                    Corson Command Center
-                  </h1>
-                </Link>
-                <p className="text-gray-500 text-[11px] tracking-wide hidden sm:block">
-                  Corson Agency · Hard Techno Division
+            <Link
+              to="/"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-3 group"
+              aria-label="Corson Command Center — Home"
+            >
+              {/* Mobile: wave mark only */}
+              <img
+                src="/logo-mark.png"
+                alt="Corson Agency"
+                className="md:hidden h-9 w-9 object-contain flex-shrink-0 transition-opacity group-hover:opacity-80"
+              />
+              {/* Desktop: full lockup */}
+              <img
+                src="/logo-lockup.png"
+                alt="Corson Agency"
+                className="hidden md:block h-9 w-auto object-contain flex-shrink-0 transition-opacity group-hover:opacity-80"
+              />
+              <div className="hidden sm:block border-l border-gray-700/70 pl-3 leading-tight">
+                <p className="text-gray-300 text-[11px] font-display font-semibold uppercase tracking-[0.22em]">
+                  Command Center
+                </p>
+                <p className="text-gray-500 text-[10px] tracking-wide">
+                  Hard Techno Division · Danny Ho
                 </p>
               </div>
-            </div>
+            </Link>
 
             {/* Desktop nav links */}
             <div className="hidden md:flex items-center gap-0.5 ml-2">
