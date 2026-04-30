@@ -37,6 +37,7 @@ const ACTION_ICON = {
   stage_changed: { icon: '🔄', color: 'text-indigo-400' },
 };
 
+// eslint-disable-next-line no-unused-vars
 function ActivityEntry({ entry }) {
   const { icon, color } = ACTION_ICON[entry.action] || { icon: '•', color: 'text-gray-400' };
   return (
@@ -817,6 +818,8 @@ export default function ArtistDetail() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDealModal, setShowDealModal] = useState(false);
   const [editShow, setEditShow] = useState(null);
+  // activityLog still loaded + appended-to so it's hot when the section returns.
+  // eslint-disable-next-line no-unused-vars
   const [activityLog, setActivityLog] = useState([]);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
@@ -1258,51 +1261,11 @@ export default function ArtistDetail() {
               )}
             </section>
 
-            {/* ── IN THE WORKS ── */}
-            <section className="mb-8">
-              <h3 className="text-lg font-bold text-white mb-3">In The Works</h3>
-              {pipeline.length === 0 ? (
-                <div className="bg-gray-900 rounded-xl border border-gray-800 px-5 py-8 text-center">
-                  <p className="text-gray-500 text-sm">No offers or negotiations in progress.</p>
-                </div>
-              ) : (
-                <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-800">
-                        {['Date', 'Market', 'Venue', 'Buyer', 'Fee Offered', 'Stage'].map((h) => (
-                          <th key={h} className="text-left text-gray-500 text-xs font-semibold uppercase tracking-wider px-5 py-3">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pipeline.map((deal) => (
-                        <tr key={deal.id} className="border-b border-gray-800 last:border-0 bg-yellow-950/10 hover:bg-yellow-950/20 transition-colors">
-                          <td className="px-5 py-3.5 text-gray-300 whitespace-nowrap">{fmtDate(deal)}</td>
-                          <td className="px-5 py-3.5 text-gray-300">{deal.market}</td>
-                          <td className="px-5 py-3.5 text-white font-medium">{deal.venue}</td>
-                          <td className="px-5 py-3.5 text-gray-400">{deal.buyer_company || deal.buyer}</td>
-                          <td className="px-5 py-3.5 text-yellow-400 font-semibold">{deal.fee_offered}</td>
-                          <td className="px-5 py-3.5"><DealBadge type={deal.stage} /></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-
-            {/* ── ACTIVITY LOG ── */}
-            <section className="mb-8">
-              <h3 className="text-lg font-bold text-white mb-3">Activity</h3>
-              <div className="bg-gray-900 rounded-xl border border-gray-800 px-5">
-                {activityLog.length === 0 ? (
-                  <p className="text-gray-600 text-sm py-8 text-center">No activity recorded yet.</p>
-                ) : (
-                  activityLog.map(entry => <ActivityEntry key={entry.id} entry={entry} />)
-                )}
-              </div>
-            </section>
+            {/* ── IN THE WORKS + ACTIVITY removed in Dashboard Phase 1 ──
+                Underlying state (pipeline, activityLog, setActivityLog) and
+                queries are preserved — they still feed the Roster KPI sub-text
+                and the Add Show / Add Deal handlers. May return in a different
+                form later. */}
 
             {/* ── ACTION BUTTONS ── */}
             <div className="flex flex-wrap gap-3">

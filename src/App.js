@@ -96,7 +96,7 @@ function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd }) {
   return (
     <section className="mb-8">
       <div className="flex items-center gap-2 mb-4">
-        <h3 className="text-lg font-display font-semibold text-white tracking-tight">Urgent Issues</h3>
+        <h3 className="text-lg font-display font-semibold text-white tracking-tight">To Do</h3>
         {items.length > 0 && (
           <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{items.length}</span>
         )}
@@ -105,7 +105,7 @@ function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd }) {
 
       {items.length === 0 ? (
         <div className="bg-gray-900/80 backdrop-blur-sm rounded-2xl border border-gray-800/80 shadow-card px-5 py-8 text-center">
-          <p className="text-emerald-400 text-sm font-semibold">All clear — no urgent issues.</p>
+          <p className="text-emerald-400 text-sm font-semibold">All clear — no to-dos.</p>
         </div>
       ) : (
         <DragDropContext onDragEnd={onDragEnd}>
@@ -595,7 +595,7 @@ function Dashboard() {
     return [
       { label: 'Roster Artists', value: String(totalArtists),      sub: `${priorityCount} priority · ${rosterCount} full roster`, icon: '🎧', color: 'indigo' },
       { label: 'Active Deals',   value: String(activeDeals),       sub: `${pipelineActive} in pipeline · ${showsActive} confirmed+`, icon: '📋', color: 'blue' },
-      { label: 'Urgent Issues',  value: String(urgentRows.length), sub: 'Unresolved — require action', icon: '🚨', color: 'red' },
+      { label: 'To Do Items',    value: String(urgentRows.length), sub: 'Unresolved — require action', icon: '🚨', color: 'red' },
       { label: 'YTD Commission', value: `$${commission.toLocaleString()}`, sub: `15% of $${commissionableFees.toLocaleString()} confirmed`, icon: '💰', color: 'green' },
     ];
   }, [rosterArtists, allShows, allPipeline, urgentRows]);
@@ -815,14 +815,23 @@ function Dashboard() {
           </section>
         )}
 
-        {/* ── URGENT ISSUES / TO-DO ── */}
-        <UrgentIssuesSection
-          items={urgentIssues}
-          resolving={resolving}
-          onResolve={handleResolve}
-          onDragEnd={handleDragEnd}
+        {/* ── AVAILABILITY CHECK ── */}
+        <AvailabilityWidget
+          artists={rosterArtists}
+          shows={allShows}
+          pipeline={allPipeline}
+          loading={loading}
         />
 
+        {/* ── TO DO (was Urgent Issues — schema/table unchanged) ── */}
+        <div className="mt-8">
+          <UrgentIssuesSection
+            items={urgentIssues}
+            resolving={resolving}
+            onResolve={handleResolve}
+            onDragEnd={handleDragEnd}
+          />
+        </div>
 
         {/* ── QUICK NOTES ── */}
         <section className="mb-8">
@@ -840,14 +849,6 @@ function Dashboard() {
             />
           </div>
         </section>
-
-        {/* ── AVAILABILITY CHECK ── */}
-        <AvailabilityWidget
-          artists={rosterArtists}
-          shows={allShows}
-          pipeline={allPipeline}
-          loading={loading}
-        />
 
         {/* ── INDUSTRY INTEL (bottom of dashboard) ── */}
         <section className="mt-8">

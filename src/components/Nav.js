@@ -4,8 +4,8 @@ import { supabase } from '../lib/supabase';
 
 const NAV_LINKS = [
   { to: '/',           label: 'Dashboard' },
-  { to: '/artists',    label: 'Artists' },
   { to: '/pipeline',   label: 'Deal Pipeline' },
+  { to: '/artists',    label: 'Artists' },
   { to: '/rolodex',    label: 'Rolodex' },
   { to: '/financials', label: 'Financials' },
 ];
