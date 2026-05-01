@@ -7,7 +7,6 @@ import Nav from '../components/Nav';
 import ConfirmationEmailModal from '../components/ConfirmationEmailModal';
 import OfferForwardEmailModal from '../components/OfferForwardEmailModal';
 import CampaignsSection from '../components/CampaignsSection';
-import TodaysFocus from '../components/TodaysFocus';
 import OfferBin from '../components/OfferBin';
 
 // ── ADD DEAL MODAL ────────────────────────────────────────────────────────────
@@ -1277,9 +1276,6 @@ export default function Pipeline() {
 
         {/* ── OFFER BIN — PDF/DOCX offer ingest ── */}
         <OfferBin />
-
-        {/* ── TODAY'S FOCUS ── */}
-        <TodaysFocus artistNames={artistNames} />
 
         {/* ── KANBAN BOARD ── */}
         {showAddDeal && (
