@@ -221,33 +221,7 @@ function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, drag
   );
 }
 
-// ── KPI CARD ──────────────────────────────────────────────────────────────────
-function KpiCard({ kpi }) {
-  const accent = {
-    indigo: { bar: 'from-indigo-500 to-indigo-400',     value: 'text-indigo-300',  glow: 'group-hover:shadow-indigo-500/15'  },
-    blue:   { bar: 'from-sky-500 to-blue-400',          value: 'text-sky-300',     glow: 'group-hover:shadow-sky-500/15'     },
-    red:    { bar: 'from-rose-500 to-red-400',          value: 'text-rose-300',    glow: 'group-hover:shadow-rose-500/15'    },
-    green:  { bar: 'from-emerald-500 to-teal-400',      value: 'text-emerald-300', glow: 'group-hover:shadow-emerald-500/15' },
-  }[kpi.color];
-
-  return (
-    <div className="group relative bg-gray-900/80 backdrop-blur-sm rounded-2xl p-6 border border-gray-800/80 shadow-card hover:shadow-card-hover hover:border-gray-700 hover:-translate-y-0.5 transition-all duration-300 ease-out overflow-hidden">
-      {/* Top accent bar */}
-      <div className={`absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r ${accent.bar} opacity-80 group-hover:opacity-100 transition-opacity`} />
-
-      <div className="flex items-center justify-between">
-        <span className="text-gray-400 text-[11px] font-semibold uppercase tracking-[0.16em]">
-          {kpi.label}
-        </span>
-        <span className="text-xl opacity-70 group-hover:opacity-100 transition-opacity">{kpi.icon}</span>
-      </div>
-      <div className={`font-display font-bold text-[2.4rem] leading-none mt-3 tabular-nums tracking-tight ${accent.value}`}>
-        {kpi.value}
-      </div>
-      <div className="text-gray-500 text-xs mt-2 leading-snug">{kpi.sub}</div>
-    </div>
-  );
-}
+// KpiCard removed in Phase 2.1 — KPI strip deleted from Dashboard.
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
 // ── AVAILABILITY WIDGET ──────────────────────────────────────────────────────
@@ -567,38 +541,7 @@ function Dashboard() {
     [urgentRows, artistNameBySlug]
   );
 
-  // KPIs derived reactively so they re-compute whenever raw state changes
-  // (e.g. handleResolve removes an item from urgentRows → the Urgent Issues
-  // KPI decrements immediately, no page reload needed).
-  const kpis = useMemo(() => {
-    const totalArtists   = rosterArtists.length;
-    const priorityCount  = rosterArtists.filter(a => a.category === 'priority').length;
-    const rosterCount    = rosterArtists.filter(a => a.category !== 'priority').length;
-
-    // Active = pipeline rows in {Inquiry / Request, Offer In + Negotiating}
-    //        + shows in {Confirmed, Advancing}. Explicitly NOT Settled.
-    const ACTIVE_PIPELINE_STAGES = new Set(['Inquiry / Request', 'Offer In + Negotiating']);
-    const ACTIVE_SHOW_STAGES     = new Set(['Confirmed', 'Advancing']);
-    const pipelineActive = allPipeline.filter(d => ACTIVE_PIPELINE_STAGES.has(d.stage)).length;
-    const showsActive    = allShows.filter(s => ACTIVE_SHOW_STAGES.has(s.deal_type || s.status)).length;
-    const activeDeals    = pipelineActive + showsActive;
-
-    // Commission — 15% of Confirmed / Advancing / Settled show fees
-    const COMMISSIONABLE_STATUSES = new Set(['Confirmed', 'Advancing', 'Settled']);
-    const commissionableFees = allShows.reduce((sum, s) => {
-      if (!COMMISSIONABLE_STATUSES.has(s.deal_type || s.status)) return sum;
-      const n = parseFloat((s.fee || '').replace(/[^0-9.]/g, ''));
-      return sum + (isNaN(n) ? 0 : n);
-    }, 0);
-    const commission = Math.round(commissionableFees * 0.15);
-
-    return [
-      { label: 'Roster Artists', value: String(totalArtists),      sub: `${priorityCount} priority · ${rosterCount} full roster`, icon: '🎧', color: 'indigo' },
-      { label: 'Active Deals',   value: String(activeDeals),       sub: `${pipelineActive} in pipeline · ${showsActive} confirmed+`, icon: '📋', color: 'blue' },
-      { label: 'To Do Items',    value: String(urgentRows.length), sub: 'Unresolved — require action', icon: '🚨', color: 'red' },
-      { label: 'YTD Commission', value: `$${commission.toLocaleString()}`, sub: `15% of $${commissionableFees.toLocaleString()} confirmed`, icon: '💰', color: 'green' },
-    ];
-  }, [rosterArtists, allShows, allPipeline, urgentRows]);
+  // KPI useMemo removed in Phase 2.1 — KPI strip deleted from Dashboard.
 
   useEffect(() => {
     async function load() {
@@ -745,15 +688,7 @@ function Dashboard() {
           </div>
         )}
 
-        {/* ── KPI CARDS ── */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
-          {loading
-            ? Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="bg-gray-900/80 rounded-2xl p-6 border border-gray-800 animate-pulse h-32 shadow-card" />
-              ))
-            : kpis.map((kpi) => <KpiCard key={kpi.label} kpi={kpi} />)
-          }
-        </section>
+        {/* KPI strip removed in Phase 2.1 — Dashboard now opens directly into Master Touring Grid. */}
 
         {/* ── MASTER TOURING GRID ── */}
         <section className="mb-10">
