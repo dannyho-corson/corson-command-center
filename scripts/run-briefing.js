@@ -1054,6 +1054,23 @@ function finalize(extra = {}) {
   gridsResult = regenerateGrids();
 
   finalize();
+
+  // Drive sync — silent unless something moved or it failed.
+  // generate-grids.js already triggers sync internally; this second pass
+  // catches mid-day bible edits the grid run wouldn't have noticed. Both
+  // are silent in steady state.
+  try {
+    const { syncDrive } = require('./sync-drive');
+    const result = await syncDrive();
+    if (!result.success) {
+      console.error(`(drive sync failed: ${result.error})`);
+    } else if (result.transferred > 0) {
+      console.log(`Synced ${result.transferred} file(s) to Drive`);
+    }
+  } catch (err) {
+    console.error(`(drive sync threw: ${err.message})`);
+  }
+
   process.exit(errors.length ? 1 : 0);
 })().catch(e => { recordError('main', e); finalize({ status: 'ERROR', reason: 'unhandled main' }); process.exit(1); });
 

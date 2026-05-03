@@ -835,6 +835,20 @@ async function main() {
   console.log('\n' + '='.repeat(60));
   console.log(`Generated ${gridCount} artist grids, Master grid with ${masterStats.totalShowRows} shows, ${masterStats.totalFestivalRows} festival rows`);
   console.log('='.repeat(60));
+
+  // Drive sync — silent unless something moved or it failed.
+  // Wrapped so a sync failure can't crash a successful regen.
+  try {
+    const { syncDrive } = require('./sync-drive');
+    const result = await syncDrive();
+    if (!result.success) {
+      console.error(`(drive sync failed: ${result.error})`);
+    } else if (result.transferred > 0) {
+      console.log(`Synced ${result.transferred} file(s) to Drive`);
+    }
+  } catch (err) {
+    console.error(`(drive sync threw: ${err.message})`);
+  }
 }
 
 main().catch(err => { console.error('FATAL:', err); process.exit(1); });
