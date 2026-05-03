@@ -402,7 +402,19 @@ async function markProcessed(supabase, message_id, subject, sender, classified_a
 }
 async function existsShow(s, slug, d)   { if (!slug||!d) return false; const { data } = await s.from('shows').select('id').eq('artist_slug',slug).eq('event_date',d).limit(1); return (data?.length||0)>0; }
 async function existsPipeline(s, slug, d, st) { if (!slug||!d) return false; const { data } = await s.from('pipeline').select('id').eq('artist_slug',slug).eq('event_date',d).eq('stage',st).limit(1); return (data?.length||0)>0; }
-async function existsUrgent(s, slug, issue) { if (!slug||!issue) return false; const { data } = await s.from('urgent_issues').select('id').eq('artist_slug',slug).eq('issue',issue).eq('resolved',false).limit(1); return (data?.length||0)>0; }
+// Dedup against either the legacy `issue` field OR the Phase 2.2 `task` field.
+// Briefing always mirrors task→issue so checking issue alone catches both, but
+// belt-and-suspenders here in case a manual entry only populated task.
+async function existsUrgent(s, slug, value) {
+  if (!slug || !value) return false;
+  const { data } = await s.from('urgent_issues')
+    .select('id')
+    .eq('artist_slug', slug)
+    .eq('resolved', false)
+    .or(`issue.eq.${value.replace(/,/g, '\\,')},task.eq.${value.replace(/,/g, '\\,')}`)
+    .limit(1);
+  return (data?.length || 0) > 0;
+}
 async function existsActivity(s, slug, desc) { if (!slug||!desc) return false; const since = new Date(Date.now()-7*86400000).toISOString(); const { data } = await s.from('activity_log').select('id').eq('artist_slug',slug).eq('description',desc).gte('created_at',since).limit(1); return (data?.length||0)>0; }
 
 // ─── claude intelligence layer ────────────────────────────────────────────
@@ -421,7 +433,7 @@ async function runClaudeLayer(env, supabase, newEmails, validSlugs) {
   // Load current pipeline + urgent issues + existing buyers + targets + active campaigns for context
   const [{ data: pipelineRows }, { data: urgentRows }, { data: artistRows }, { data: buyerRows }, { data: targetRows }, { data: campaignRows }] = await Promise.all([
     supabase.from('pipeline').select('artist_slug, stage, venue, market, buyer, buyer_company, fee_offered, event_date, notes').order('event_date', { ascending: true }).limit(200),
-    supabase.from('urgent_issues').select('artist_slug, issue, priority').eq('resolved', false).limit(50),
+    supabase.from('urgent_issues').select('artist_slug, issue, task, priority').eq('resolved', false).limit(50),
     supabase.from('artists').select('slug, name, manager_email').limit(100),
     supabase.from('buyers').select('name, email, company').limit(500),
     supabase.from('targets').select('id, artist_slug, promoter, contact, status').limit(500),
@@ -436,7 +448,16 @@ async function runClaudeLayer(env, supabase, newEmails, validSlugs) {
 You MUST return valid JSON matching this exact schema:
 {
   "summary": "2-3 sentence plain-English briefing of what matters today",
-  "urgent": [{"artist_slug": "...", "issue": "...", "priority": "High|Medium|Low", "why_urgent": "...", "suggested_action": "..."}],
+  "urgent": [{
+    "artist_slug": "...",
+    "task": "...",            // imperative, verb-first, 5-10 words
+    "why": "...",             // 1-line context for why this matters
+    "next_step": "...",       // concrete action: who, by when, with what
+    "action_type": "REPLY|CONFIRM|SEND|REVIEW|DRAFT|NEGOTIATE|DECIDE|SCHEDULE|SUBMIT",
+    "domain": "DEAL|OPERATIONS|RELATIONSHIP|CAMPAIGN|AGENCY|CONTENT|DEVELOPMENT",
+    "priority": "red|yellow|green",
+    "issue": "..."            // backward-compat field — set equal to task
+  }],
   "draft_replies": [{"to_email": "email@example.com", "subject": "...", "body": "..."}],
   "new_buyers": [{"name": "...", "email": "...", "company": "...", "market": "..."}],
   "target_updates": [{"target_id": "<uuid>", "new_status": "...", "note": "..."}],
@@ -446,13 +467,75 @@ You MUST return valid JSON matching this exact schema:
 
 Rules:
 - "summary": lead with the single most important thing for Danny today
-- "urgent": only include items NOT already in the urgent_issues list. Maximum 8 items. artist_slug must match a known roster slug. Assign priority per the rubric below.
-- "draft_replies": the 2-3 most actionable emails (prefer the ones you flagged as High priority). Use manager_email from the roster when responding about an artist. Write in Danny's voice (direct, professional, no fluff). Do NOT include "[AI DRAFT]" markers — the script adds that.
+- "urgent": only include items NOT already in the urgent_issues list. Maximum 8 items. artist_slug must match a known roster slug. EVERY urgent item must pass the 3-Test Filter and be returned in the structured shape below.
+- "draft_replies": the 2-3 most actionable emails (prefer the ones you flagged as red priority). Use manager_email from the roster when responding about an artist. Write in Danny's voice (direct, professional, no fluff). Do NOT include "[AI DRAFT]" markers — the script adds that.
 - Only include artists that are in the provided roster. Return [] for any section with nothing to add.
 
-PRIORITY RUBRIC — assign "priority" for each urgent item using these rules exactly:
+────────────────────────────────────────────────────────────────────
+URGENT / TO-DO ITEMS — THE 3-TEST FILTER
+────────────────────────────────────────────────────────────────────
+Before generating ANY urgent to-do, the email must pass ALL THREE tests:
 
-"High" (DO TODAY — red) — any of:
+  1. ACTION REQUIRED BY DANNY — not informational, not already handled
+     by someone else, not a status update, not "just FYI." Something
+     specific Danny himself must do.
+
+  2. TIME-BOUNDED — there is a clear "why now" (a date, a deadline, a
+     stake). "Buyer waiting 5 days" qualifies. "Cool festival exists"
+     does not.
+
+  3. CONCRETE NEXT STEP — you can name a specific action with a who,
+     a what, and ideally a when. If you can only say "follow up
+     someday," skip it.
+
+If an email fails ANY test, do NOT generate a to-do. Mention it in
+the summary as context if relevant, but it does NOT belong in the
+To Do list. Erring on the side of fewer, sharper to-dos is correct.
+
+────────────────────────────────────────────────────────────────────
+URGENT ITEM STRUCTURED FIELDS
+────────────────────────────────────────────────────────────────────
+
+For every urgent item that passes the 3-Test Filter, return:
+
+  task        — IMPERATIVE, verb-first, 5-10 words. The thing to do,
+                phrased so Danny can read it in 1 second and act.
+                NOT "X needs Y" → use "Lock multicam with Weston" instead.
+  why         — 1-line context. Why now? What's the stake? Date proximity?
+                Buyer history? Manager waiting? Keep to ~10-15 words.
+  next_step   — Concrete next step: WHO Danny contacts, WHAT he sends/
+                says, by WHEN. "Reply to Weston by EOD with approved
+                budget" — not "follow up."
+  action_type — One of 9 enums (see below). Pick the most specific.
+  domain      — One of 7 enums (see below).
+  priority    — "red" (do today), "yellow" (do this week), "green"
+                (do this month). Use the rubric below.
+  issue       — Set EQUAL to task. Backward-compat with legacy UI code.
+
+ACTION TYPES (9):
+  REPLY      — respond to someone who messaged you
+  CONFIRM    — verify something happened (deposit cleared, contract signed)
+  SEND       — push out invoice, contract, asset, deliverable
+  REVIEW     — look at something and decide (artwork, offer, request PDF)
+  DRAFT      — write something new (cold email, confirmation, pitch)
+  NEGOTIATE  — counter, push back, close on a deal in motion
+  DECIDE     — make a call (kill show, change fee, escalate to Leo)
+  SCHEDULE   — book meeting, call, advance window
+  SUBMIT     — pitch artists / submissions / festival applications
+               (distinct from SEND because it's strategic outbound)
+
+DOMAINS (7):
+  DEAL          — actively moving a booking through the pipeline
+  OPERATIONS    — flights, hotels, contracts, invoices, advancing
+  RELATIONSHIP  — buyer outreach, agency partner, manager check-in
+  CAMPAIGN      — outreach campaigns (CLAWZ EU, JK Spain, etc)
+  AGENCY        — internal Corson stuff (Leo coordination, team)
+  CONTENT       — artwork, social, press, press kits
+  DEVELOPMENT   — artist development moves (Service vs Development framing)
+
+PRIORITY RUBRIC — assign "priority" using these rules exactly:
+
+"red" (DO TODAY) — any of:
   - Show is within 7 days and something is missing (contract, deposit, advancing info)
   - Deposit is overdue
   - Contract deadline has passed
@@ -460,20 +543,53 @@ PRIORITY RUBRIC — assign "priority" for each urgent item using these rules exa
   - Competing offers on the same date need resolution today
   - Radius-clause conflict flagged
 
-"Medium" (DO THIS WEEK — yellow) — any of:
+"yellow" (DO THIS WEEK) — any of:
   - Active negotiation needing follow-up
   - Offer received, needs forwarding to artist team
   - Avail check that came in this week
   - Show is within 30 days and needs advancing started
   - Payment follow-up needed (not yet overdue)
 
-"Low" (DO THIS MONTH — green) — any of:
+"green" (DO THIS MONTH) — any of:
   - Early-stage inquiry
   - Festival pitch opportunity
   - Relationship building / outreach
   - Show is 30+ days out with no immediate blocker
 
-If an item doesn't clearly fit any bucket, default to "Medium".
+If an item doesn't clearly fit any bucket, default to "yellow".
+
+────────────────────────────────────────────────────────────────────
+EXAMPLES — STUDY THESE BEFORE WRITING
+────────────────────────────────────────────────────────────────────
+
+❌ BAD (email-shaped — re-stating what the email said):
+   "Mandy Denver multicam — Weston needs pricing lock"
+
+✅ GOOD (task-shaped — Danny reads it and knows what to do):
+   {
+     "task": "Lock multicam pricing with Weston",
+     "why": "Mandy lands tomorrow for Denver show 4/25",
+     "next_step": "Reply to Weston by EOD with approved budget",
+     "action_type": "REPLY",
+     "domain": "OPERATIONS",
+     "priority": "red",
+     "issue": "Lock multicam pricing with Weston"
+   }
+
+❌ BAD (informational — fails Test 1, no action required):
+   "Buyer X confirmed they got the offer"
+   → DON'T return this as a to-do. Mention in summary if relevant.
+
+✅ GOOD (real strategic submission):
+   {
+     "task": "Submit JK roster pitch to Time Warp NYC",
+     "why": "Time Warp expanding US, need to be in for 2026 lineup",
+     "next_step": "Email Maarten van Dulst with JK 2025 reel + fee range",
+     "action_type": "SUBMIT",
+     "domain": "CAMPAIGN",
+     "priority": "yellow",
+     "issue": "Submit JK roster pitch to Time Warp NYC"
+   }
 
 NEW BUYERS — extract from today's emails any sender who looks like a promoter/buyer AND either isn't in the existing_buyers list OR is there but their email address is what triggered this email today. For each:
   - name: human name (e.g. "Jane Smith"). Null if the sender is a company-only (no person attached)
@@ -665,12 +781,20 @@ async function detectStaleDeals(supabase, artistsRows) {
     // Dedup
     if (await staleUrgentExists(supabase, d.artist_slug, dealKey)) continue;
 
-    // Insert urgent
+    // Phase 2.2 — synthesize task-shaped row for stale follow-ups so they
+    // render in the new 3-line format alongside Claude-flagged items.
+    const staleTask = `Follow up with ${buyer} on ${artist} ${city || 'TBD'}`.slice(0, 90);
     const { error: uerr } = await supabase.from('urgent_issues').insert({
-      artist_slug: d.artist_slug,
-      issue: issueText.slice(0, 500),
-      priority: 'High',
-      resolved: false,
+      artist_slug:  d.artist_slug,
+      issue:        issueText.slice(0, 500),  // legacy field — keeps the [#dealKey] dedup tag
+      task:         staleTask,
+      why:          `${days} days no activity on ${d.stage} deal`,
+      next_step:    `Reply to ${buyer} confirming status${d.event_date ? ` for ${d.event_date}` : ''}`,
+      action_type:  'REPLY',
+      domain:       'DEAL',
+      priority:     'High',
+      resolved:     false,
+      manual_entry: false,
     });
     if (uerr) { recordError(`stale urgent ${d.id}`, uerr); continue; }
     urgent++;
@@ -777,7 +901,12 @@ function finalize(extra = {}) {
     console.log(intelligence.summary);
     if (intelligence.urgent?.length) {
       console.log('\nCLAUDE-FLAGGED URGENT ITEMS:');
-      for (const u of intelligence.urgent) console.log(`  • [${u.artist_slug}] ${u.issue} — why: ${u.why_urgent} — action: ${u.suggested_action}`);
+      for (const u of intelligence.urgent) {
+        const taskText = u.task || u.issue || '(no task)';
+        const whyText  = u.why  || u.why_urgent     || '—';
+        const stepText = u.next_step || u.suggested_action || '—';
+        console.log(`  • [${u.artist_slug}] ${taskText} — why: ${whyText} — action: ${stepText}`);
+      }
     }
     if (inserted.drafts.length) {
       console.log('\nDRAFTS SAVED TO OUTLOOK:');
@@ -889,13 +1018,37 @@ function finalize(extra = {}) {
   } catch (e) { recordError('intelligence', e); }
 
   // ─── insert Claude-flagged urgent issues ──────────────────────────────
+  // Phase 2.2: write task/why/next_step/action_type/domain in addition to
+  // legacy `issue` (mirrored from task for backward compat). Priority maps
+  // red/yellow/green from prompt → High/Medium/Low for storage so existing
+  // UI/derivation logic keeps working.
   if (intelligence?.urgent?.length) {
+    const PRIORITY_MAP = { red: 'High', yellow: 'Medium', green: 'Low' };
+    const ACTION_TYPES = new Set(['REPLY','CONFIRM','SEND','REVIEW','DRAFT','NEGOTIATE','DECIDE','SCHEDULE','SUBMIT']);
+    const DOMAINS = new Set(['DEAL','OPERATIONS','RELATIONSHIP','CAMPAIGN','AGENCY','CONTENT','DEVELOPMENT']);
     for (const u of intelligence.urgent) {
       try {
         if (!validSlugs.has(u.artist_slug)) continue;
-        if (await existsUrgent(supabase, u.artist_slug, u.issue)) continue;
-        const priority = ['High', 'Medium', 'Low'].includes(u.priority) ? u.priority : 'Medium';
-        const row = { artist_slug: u.artist_slug, issue: u.issue, priority, resolved: false };
+        // Prefer the new task field; fall back to issue for resilience
+        const task = (u.task || u.issue || '').trim();
+        if (!task) continue;
+        if (await existsUrgent(supabase, u.artist_slug, task)) continue;
+        // Map prompt's red/yellow/green → storage's High/Medium/Low. Accept
+        // legacy High/Medium/Low too in case the model regresses on the schema.
+        const rawPri = String(u.priority || '').toLowerCase();
+        const priority = PRIORITY_MAP[rawPri] || (['High','Medium','Low'].includes(u.priority) ? u.priority : 'Medium');
+        const row = {
+          artist_slug:  u.artist_slug,
+          issue:        task,                                                       // legacy mirror
+          task,
+          why:          (u.why || '').trim() || null,
+          next_step:    (u.next_step || '').trim() || null,
+          action_type:  ACTION_TYPES.has(u.action_type) ? u.action_type : null,
+          domain:       DOMAINS.has(u.domain) ? u.domain : null,
+          priority,
+          resolved:     false,
+          manual_entry: false,
+        };
         const { data, error } = await supabase.from('urgent_issues').insert(row).select().single();
         if (error) { recordError(`claude-urgent ${u.artist_slug}`, error); continue; }
         inserted.urgent.push(data); counts.urgent++;
@@ -1033,14 +1186,26 @@ function finalize(extra = {}) {
         if (uerr) { recordError(`campaign update ${camp.id}`, uerr); continue; }
 
         // Flag urgent issue so Danny sees it in the TODO list
+        // Phase 2.2 — synthesized task structure
         const buyer = r.buyer_email || '(unknown)';
         const issue = `Campaign reply: ${buyer} replied to ${camp.artist_slug} / ${camp.name}${r.is_offer ? ' — OFFER' : ''}${r.note ? ' — ' + r.note : ''}`;
-        if (!(await existsUrgent(supabase, camp.artist_slug, issue))) {
+        const campTask = r.is_offer
+          ? `Review ${buyer} offer on ${camp.name}`
+          : `Reply to ${buyer} on ${camp.name}`;
+        if (!(await existsUrgent(supabase, camp.artist_slug, campTask))) {
           await supabase.from('urgent_issues').insert({
-            artist_slug: camp.artist_slug,
-            issue: issue.slice(0, 500),
-            priority: r.is_offer ? 'High' : 'Medium',
-            resolved: false,
+            artist_slug:  camp.artist_slug,
+            issue:        issue.slice(0, 500),
+            task:         campTask.slice(0, 200),
+            why:          `Active outreach campaign reply${r.is_offer ? ' — concrete offer' : ''}`,
+            next_step:    r.is_offer
+              ? `Open the thread, summarize fee/date/HGR, forward to artist team`
+              : `Open the thread and continue the conversation today`,
+            action_type:  r.is_offer ? 'REVIEW' : 'REPLY',
+            domain:       'CAMPAIGN',
+            priority:     r.is_offer ? 'High' : 'Medium',
+            resolved:     false,
+            manual_entry: false,
           });
           counts.urgent = (counts.urgent || 0) + 1;
         }

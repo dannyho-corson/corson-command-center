@@ -35,11 +35,33 @@ function shapeUrgentIssue(row, artistNameBySlug) {
     label,
     priority: row.priority,
     issue: row.issue,
+    // Phase 2.2 — task-shaped fields. Null on legacy rows.
+    task: row.task || null,
+    why: row.why || null,
+    nextStep: row.next_step || null,
+    actionType: row.action_type || null,
+    domain: row.domain || null,
+    manualEntry: row.manual_entry === true,
     createdAt: row.created_at,
     sortOrder: row.sort_order ?? 0,
     manuallyPrioritized: row.manually_prioritized === true,
   };
 }
+
+// Phase 2.2 — emoji icon per action type (visual at-a-glance scan)
+const ACTION_ICONS = {
+  REPLY:     '📞',
+  CONFIRM:   '✅',
+  SEND:      '📤',
+  REVIEW:    '🔍',
+  DRAFT:     '📝',
+  NEGOTIATE: '🤝',
+  DECIDE:    '🚨',
+  SCHEDULE:  '📅',
+  SUBMIT:    '🎤',
+};
+const ACTION_TYPES = ['REPLY','CONFIRM','SEND','REVIEW','DRAFT','NEGOTIATE','DECIDE','SCHEDULE','SUBMIT'];
+const DOMAINS = ['DEAL','OPERATIONS','RELATIONSHIP','CAMPAIGN','AGENCY','CONTENT','DEVELOPMENT'];
 
 // Maps the three droppable zones used in UrgentIssuesSection to DB priority values.
 const SEVERITY_BY_DROPPABLE = { red: 'High', yellow: 'Medium', green: 'Low' };
@@ -75,12 +97,170 @@ function SeverityBadge({ severity, label }) {
   );
 }
 
+// ── ADD TO DO MODAL ───────────────────────────────────────────────────────────
+// Phase 2.2 — manual entry path. Inserts a new urgent_issues row with
+// manual_entry=true so we can later distinguish manual vs briefing-generated.
+// Maps the chosen severity (red/yellow/green) → priority (High/Medium/Low) so
+// stored data stays consistent with the briefing's write path.
+function AddToDoModal({ artists, onClose, onSaved }) {
+  const [task, setTask] = useState('');
+  const [why, setWhy] = useState('');
+  const [nextStep, setNextStep] = useState('');
+  const [actionType, setActionType] = useState('REPLY');
+  const [domain, setDomain] = useState('DEAL');
+  const [severity, setSeverity] = useState('yellow');  // red/yellow/green
+  const [artistSlug, setArtistSlug] = useState('');    // optional
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const PRIORITY_BY_SEVERITY = { red: 'High', yellow: 'Medium', green: 'Low' };
+
+  async function handleSave(e) {
+    e.preventDefault();
+    if (!task.trim()) { setErr('Task is required.'); return; }
+    setSaving(true); setErr(null);
+    const row = {
+      artist_slug:  artistSlug || null,
+      issue:        task.trim(),                     // legacy mirror
+      task:         task.trim(),
+      why:          why.trim() || null,
+      next_step:    nextStep.trim() || null,
+      action_type:  actionType,
+      domain,
+      priority:     PRIORITY_BY_SEVERITY[severity],
+      resolved:     false,
+      manual_entry: true,
+    };
+    const { data, error } = await supabase.from('urgent_issues').insert(row).select().single();
+    setSaving(false);
+    if (error) { setErr(error.message); return; }
+    onSaved(data);
+    onClose();
+  }
+
+  // ESC to close
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const SEV_PILLS = [
+    { key: 'red',    label: 'DO TODAY',      bg: 'bg-rose-500/90' },
+    { key: 'yellow', label: 'DO THIS WEEK',  bg: 'bg-amber-500/90' },
+    { key: 'green',  label: 'DO THIS MONTH', bg: 'bg-emerald-500/90' },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-start justify-center pt-12 sm:pt-20 px-4 bg-black/70"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-gray-900 border border-gray-700/80 rounded-2xl w-full max-w-lg shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <h3 className="text-white font-display font-semibold text-base tracking-tight">Add To Do</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+        <form onSubmit={handleSave} className="px-5 py-4 space-y-3.5">
+          <div>
+            <label className="block text-gray-500 text-[11px] uppercase tracking-[0.14em] mb-1">
+              Task <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="text" value={task} onChange={e => setTask(e.target.value)}
+              placeholder="Lock multicam pricing with Weston"
+              autoFocus required
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600"
+            />
+          </div>
+          <div>
+            <label className="block text-gray-500 text-[11px] uppercase tracking-[0.14em] mb-1">Why</label>
+            <input
+              type="text" value={why} onChange={e => setWhy(e.target.value)}
+              placeholder="Mandy lands tomorrow"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600"
+            />
+          </div>
+          <div>
+            <label className="block text-gray-500 text-[11px] uppercase tracking-[0.14em] mb-1">Next Step</label>
+            <input
+              type="text" value={nextStep} onChange={e => setNextStep(e.target.value)}
+              placeholder="Reply to Weston by EOD"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-gray-600"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-gray-500 text-[11px] uppercase tracking-[0.14em] mb-1">Action <span className="text-red-400">*</span></label>
+              <select value={actionType} onChange={e => setActionType(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+                {ACTION_TYPES.map(a => (
+                  <option key={a} value={a}>{ACTION_ICONS[a]} {a}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-gray-500 text-[11px] uppercase tracking-[0.14em] mb-1">Domain <span className="text-red-400">*</span></label>
+              <select value={domain} onChange={e => setDomain(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+                {DOMAINS.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-500 text-[11px] uppercase tracking-[0.14em] mb-1">Priority <span className="text-red-400">*</span></label>
+            <div className="flex gap-2">
+              {SEV_PILLS.map(p => (
+                <button
+                  key={p.key} type="button" onClick={() => setSeverity(p.key)}
+                  className={`text-[10px] font-bold uppercase tracking-[0.12em] px-3 py-1.5 rounded-md transition-all ${
+                    severity === p.key
+                      ? `${p.bg} text-white ring-2 ring-white/20`
+                      : 'bg-gray-800 text-gray-400 ring-1 ring-gray-700 hover:bg-gray-750 hover:text-gray-200'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-500 text-[11px] uppercase tracking-[0.14em] mb-1">Artist <span className="text-gray-700 text-[10px]">(optional)</span></label>
+            <select value={artistSlug} onChange={e => setArtistSlug(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500">
+              <option value="">— no artist —</option>
+              {artists.map(a => <option key={a.slug} value={a.slug}>{a.name}</option>)}
+            </select>
+          </div>
+
+          {err && <p className="text-red-400 text-xs">{err}</p>}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose}
+              className="text-gray-400 text-sm px-4 py-2 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-60 transition-colors"
+              style={{ backgroundColor: '#6366F1' }}>
+              {saving ? 'Saving…' : 'Save To Do'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── URGENT ISSUES SECTION ─────────────────────────────────────────────────────
 // Renders a prioritized TO-DO list grouped into DO TODAY / THIS WEEK / THIS MONTH.
 // Each group is a @hello-pangea/dnd Droppable; each row is a Draggable.
 // Same-group drag → reorder (save sort_order).
 // Cross-group drag → change priority AND sort_order (+ manually_prioritized=true).
-function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd }) {
+function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd, onAddClick }) {
   const bySort = (a, b) => (a.sortOrder - b.sortOrder)
                         || (new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   const red    = items.filter(i => i.severity === 'red').sort(bySort);
@@ -99,6 +279,14 @@ function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd }) {
         <h3 className="text-lg font-display font-semibold text-white tracking-tight">To Do</h3>
         {items.length > 0 && (
           <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{items.length}</span>
+        )}
+        {onAddClick && (
+          <button
+            onClick={onAddClick}
+            className="text-xs font-semibold px-3 py-1 rounded-lg border border-indigo-700/70 text-indigo-300 hover:bg-indigo-600 hover:text-white hover:border-indigo-500 transition-colors"
+          >
+            + Add To Do
+          </button>
         )}
         <span className="text-gray-600 text-xs ml-auto">Drag to re-prioritize</span>
       </div>
@@ -194,7 +382,22 @@ function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, drag
     >
       <div className={`w-1 self-stretch rounded-full flex-shrink-0 ${rail}`} />
       <div className="flex flex-col gap-1 flex-1 min-w-0">
+        {/* Header row: action_type · domain · artist · meta · severity */}
         <div className="flex items-center gap-2 flex-wrap">
+          {item.actionType && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.14em] text-gray-300 bg-gray-800/70 ring-1 ring-gray-700/60 rounded-md px-1.5 py-0.5"
+              title={`Action: ${item.actionType}`}
+            >
+              <span aria-hidden>{ACTION_ICONS[item.actionType] || '•'}</span>
+              <span>{item.actionType}</span>
+            </span>
+          )}
+          {item.domain && (
+            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-indigo-300/90 bg-indigo-950/40 ring-1 ring-indigo-800/50 rounded-md px-1.5 py-0.5">
+              {item.domain}
+            </span>
+          )}
           <SeverityBadge severity={item.severity} label={item.priority || item.label} />
           <Link
             to={`/artists/${item.artistSlug}`}
@@ -206,9 +409,28 @@ function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, drag
           {item.manuallyPrioritized && (
             <span title="Manually re-prioritized" className="text-xs" aria-label="Pinned">📌</span>
           )}
+          {item.manualEntry && (
+            <span title="Added manually" className="text-[10px] text-gray-500">· manual</span>
+          )}
           <span className="text-gray-600 text-xs">· {timeAgo(item.createdAt)}</span>
         </div>
-        <p className="text-gray-400 text-sm leading-relaxed">{item.issue}</p>
+
+        {/* Body: 3-line task-shaped if task exists, else single-line legacy issue */}
+        {item.task ? (
+          <>
+            <p className="text-white text-sm font-semibold leading-snug mt-0.5">{item.task}</p>
+            {item.why && (
+              <p className="text-gray-400 text-xs leading-relaxed">{item.why}</p>
+            )}
+            {item.nextStep && (
+              <p className="text-gray-300 text-xs leading-relaxed">
+                <span className="text-indigo-400 mr-1">↳</span>{item.nextStep}
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-gray-400 text-sm leading-relaxed">{item.issue}</p>
+        )}
       </div>
       <button
         onClick={onResolveClick}
@@ -514,6 +736,7 @@ function Dashboard() {
   // Urgent issues — loaded from Supabase where resolved=false. Source of truth.
   const [urgentRows, setUrgentRows] = useState([]);
   const [resolving, setResolving] = useState(null); // id currently being resolved
+  const [showAddTodo, setShowAddTodo] = useState(false); // Phase 2.2 manual entry modal
 
   // Due Today reminders
   const [dueReminders, setDueReminders] = useState([]);
@@ -765,8 +988,18 @@ function Dashboard() {
             resolving={resolving}
             onResolve={handleResolve}
             onDragEnd={handleDragEnd}
+            onAddClick={() => setShowAddTodo(true)}
           />
         </div>
+
+        {/* Phase 2.2 — Add To Do modal */}
+        {showAddTodo && (
+          <AddToDoModal
+            artists={rosterArtists}
+            onClose={() => setShowAddTodo(false)}
+            onSaved={(newRow) => setUrgentRows(prev => [newRow, ...prev])}
+          />
+        )}
 
         {/* ── QUICK NOTES ── */}
         <section className="mb-8">
