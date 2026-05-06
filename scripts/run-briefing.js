@@ -49,8 +49,8 @@ const TIMEOUT_HANDLE = setTimeout(() => {
 TIMEOUT_HANDLE.unref?.();
 
 // ─── counters ─────────────────────────────────────────────────────────────
-const counts = { emails: 0, new: 0, shows: 0, pipeline: 0, urgent: 0, activity: 0, skipped: 0, drafts: 0 };
-const inserted = { shows: [], pipeline: [], urgent: [], activity: [], drafts: [] };
+const counts = { emails: 0, new: 0, shows: 0, pipeline: 0, urgent: 0, activity: 0, skipped: 0, drafts: 0, prospects: 0 };
+const inserted = { shows: [], pipeline: [], urgent: [], activity: [], drafts: [], prospects: [] };
 const skipped = [];
 const errors = [];
 let intelligence = null; // Claude's structured analysis
@@ -462,7 +462,8 @@ You MUST return valid JSON matching this exact schema:
   "new_buyers": [{"name": "...", "email": "...", "company": "...", "market": "..."}],
   "target_updates": [{"target_id": "<uuid>", "new_status": "...", "note": "..."}],
   "campaign_replies": [{"campaign_id": "<uuid>", "buyer_email": "...", "is_offer": false, "note": "..."}],
-  "pipeline_updates": [{"artist_slug": "...", "event_date": "YYYY-MM-DD", "deal_type": "Landed|All In|Fee+Flights|TBD", "event_type": "Headline|Direct Support|Festival Stage|B2B|Club Night", "capacity": 800, "hotel_included": true, "ground_included": true, "rider_included": true, "bonus_structure": "+$500 at 400 tix", "fee_offered": "$2,500"}]
+  "pipeline_updates": [{"artist_slug": "...", "event_date": "YYYY-MM-DD", "deal_type": "Landed|All In|Fee+Flights|TBD", "event_type": "Headline|Direct Support|Festival Stage|B2B|Club Night", "capacity": 800, "hotel_included": true, "ground_included": true, "rider_included": true, "bonus_structure": "+$500 at 400 tix", "fee_offered": "$2,500"}],
+  "prospects": [{"prospect_type": "artist|coordinator|buyer|other", "name": "...", "contact_email": "...", "source_detail": "1-sentence context (who emailed when)", "initial_notes": "key context (genre, why interesting, ties)"}]
 }
 
 Rules:
@@ -470,6 +471,14 @@ Rules:
 - "urgent": only include items NOT already in the urgent_issues list. Maximum 8 items. artist_slug must match a known roster slug. EVERY urgent item must pass the 3-Test Filter and be returned in the structured shape below.
 - "draft_replies": the 2-3 most actionable emails (prefer the ones you flagged as red priority). Use manager_email from the roster when responding about an artist. Write in Danny's voice (direct, professional, no fluff). Do NOT include "[AI DRAFT]" markers — the script adds that.
 - Only include artists that are in the provided roster. Return [] for any section with nothing to add.
+
+PROSPECT DETECTION: When an email is from someone unsolicited asking to be represented (artist self-pitch, coordinator application, buyer asking us to review their artist), classify as PROSPECT and add to "prospects":
+- prospect_type: 'artist' | 'coordinator' | 'buyer' | 'other'
+- name: artist/person/agency name (if unknown, write "(name TBD)" + context)
+- contact_email: sender email
+- source_detail: one sentence — e.g. "Renault @ Swarm France emailed May 4 asking us to review their artist"
+- initial_notes: key context (genre, hook, who referred, anything that tells Danny why this matters)
+Do NOT classify roster artists or known industry contacts as prospects. Prospects = NEW unsolicited inflows only.
 
 ────────────────────────────────────────────────────────────────────
 URGENT / TO-DO ITEMS — THE 3-TEST FILTER
@@ -661,9 +670,10 @@ ${industryBible || '(not loaded)'}`.slice(0, 60_000);
     if (!Array.isArray(parsed.target_updates)) parsed.target_updates = [];
     if (!Array.isArray(parsed.campaign_replies)) parsed.campaign_replies = [];
     if (!Array.isArray(parsed.pipeline_updates)) parsed.pipeline_updates = [];
+    if (!Array.isArray(parsed.prospects)) parsed.prospects = [];
     // Validate artist slugs in urgent
     parsed.urgent = parsed.urgent.filter(u => validSlugs.has(u.artist_slug));
-    log(`Claude returned: ${parsed.urgent.length} urgent, ${parsed.draft_replies.length} drafts, ${parsed.new_buyers.length} new buyers, ${parsed.target_updates.length} target updates, ${parsed.campaign_replies.length} campaign replies, ${parsed.pipeline_updates.length} pipeline updates`);
+    log(`Claude returned: ${parsed.urgent.length} urgent, ${parsed.draft_replies.length} drafts, ${parsed.new_buyers.length} new buyers, ${parsed.target_updates.length} target updates, ${parsed.campaign_replies.length} campaign replies, ${parsed.pipeline_updates.length} pipeline updates, ${parsed.prospects.length} prospects`);
     return parsed;
   } catch (e) {
     recordError('claude', e);
@@ -887,6 +897,10 @@ function finalize(extra = {}) {
   console.log(`Campaign replies:       ${counts.campaignReplies || 0}`);
   console.log(`Pipeline enrichments:   ${counts.enrichments || 0}    (HGR fields extracted)`);
   console.log(`Pipeline auto-confirmed:${counts.autoConfirmed || 0}`);
+  console.log(`Prospects inserted:     ${counts.prospects || 0}`);
+  if (counts.conflictsFound !== undefined) {
+    console.log(`Date conflicts:         ${counts.conflictsFound} found → ${counts.conflictsInserted || 0} new urgent, ${counts.conflictsSkipped || 0} already flagged`);
+  }
   if (staleResult?.detected !== undefined) {
     const inq = staleResult.byStage['Inquiry / Request'] || 0;
     const off = staleResult.byStage['Offer In + Negotiating'] || 0;
@@ -1108,6 +1122,79 @@ function finalize(extra = {}) {
       } catch (e) { recordError(`buyer ${email}`, e); }
     }
   }
+
+  // ─── auto-insert prospects (Phase 2.7 A&R Inbox) ──────────────────────
+  if (intelligence?.prospects?.length) {
+    for (const p of intelligence.prospects) {
+      if (!p.name || !p.prospect_type) continue;
+      const validTypes = new Set(['artist', 'coordinator', 'buyer', 'other']);
+      if (!validTypes.has(p.prospect_type)) continue;
+      try {
+        // Dedup on (name, prospect_type) — case-insensitive
+        const { data: existing } = await supabase.from('prospects').select('id,name')
+          .ilike('name', p.name).eq('prospect_type', p.prospect_type).limit(1);
+        if (existing && existing.length > 0) {
+          skipped.push(`prospect dup: ${p.prospect_type}/${p.name}`); counts.skipped++;
+          continue;
+        }
+        const row = {
+          prospect_type: p.prospect_type,
+          name: p.name,
+          contact_email: p.contact_email || null,
+          source: 'email',
+          source_detail: p.source_detail || null,
+          status: 'New',
+          notes: p.initial_notes || null,
+        };
+        const { data, error: perr } = await supabase.from('prospects').insert(row).select().single();
+        if (perr) { recordError(`prospect insert ${p.name}`, perr); continue; }
+        inserted.prospects.push(data);
+        counts.prospects++;
+        log(`  + A&R: ${p.prospect_type}/${p.name}`);
+      } catch (e) { recordError(`prospect ${p.name}`, e); }
+    }
+  }
+
+  // ─── Phase 2.9 — date-conflict scan ────────────────────────────────────
+  // For each (artist_slug, event_date) with 2+ rows across pipeline + shows,
+  // insert a deduped urgent_issue. Dedup key: artist_slug + task text.
+  try {
+    const [{ data: pipeRows }, { data: showRows }] = await Promise.all([
+      supabase.from('pipeline').select('artist_slug, event_date'),
+      supabase.from('shows').select('artist_slug, event_date'),
+    ]);
+    const counter = new Map();
+    for (const r of [...(pipeRows || []), ...(showRows || [])]) {
+      if (!r.artist_slug || !r.event_date) continue;
+      const k = `${r.artist_slug}|${r.event_date}`;
+      counter.set(k, (counter.get(k) || 0) + 1);
+    }
+    let conflictsFound = 0, conflictsInserted = 0, conflictsSkipped = 0;
+    for (const [k, c] of counter) {
+      if (c < 2) continue;
+      conflictsFound++;
+      const [artist_slug, event_date] = k.split('|');
+      const task = `Resolve date conflict: ${artist_slug} has 2+ deals on ${event_date}`;
+      // Dedup: skip if an unresolved urgent_issue with this exact task already exists
+      const { data: dup } = await supabase.from('urgent_issues').select('id')
+        .eq('artist_slug', artist_slug).eq('task', task).eq('resolved', false).limit(1);
+      if (dup && dup.length > 0) { conflictsSkipped++; continue; }
+      const { error: cerr } = await supabase.from('urgent_issues').insert({
+        artist_slug, issue: task, task,
+        why: 'Auto-detected by conflict scanner.',
+        next_step: 'Decide which deal to prioritize, kill or move other.',
+        action_type: 'DECIDE', domain: 'DEAL', priority: 'High',
+        resolved: false, manual_entry: false,
+      });
+      if (cerr) { recordError(`conflict insert ${k}`, cerr); continue; }
+      conflictsInserted++;
+      counts.urgent = (counts.urgent || 0) + 1;
+      log(`  ⚠ Conflict: ${artist_slug} ${event_date} (${c} deals) → urgent_issue inserted`);
+    }
+    counts.conflictsFound = conflictsFound;
+    counts.conflictsInserted = conflictsInserted;
+    counts.conflictsSkipped = conflictsSkipped;
+  } catch (e) { recordError('conflict-scan', e); }
 
   // ─── auto-update target list outreach status ──────────────────────────
   if (intelligence?.target_updates?.length) {

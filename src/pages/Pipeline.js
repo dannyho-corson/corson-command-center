@@ -706,10 +706,16 @@ function HGRSummary({ deal }) {
 
 const ALL_STAGE_OPTIONS = ['Inquiry / Request', 'Offer In + Negotiating', 'Confirmed', 'Advancing', 'Settled'];
 
-function DealCard({ deal, col, artistNames, onCardClick, onStageChange, onDelete, dragProvided, dragSnapshot }) {
+function DealCard({ deal, col, artistNames, onCardClick, onStageChange, onDelete, dragProvided, dragSnapshot, conflictMap, highlightedConflictKey, onConflictClick }) {
   const artistName = artistNames[deal.artist_slug] || deal.artist_slug;
   const tableName = deal._source || (deal.stage ? 'pipeline' : 'shows');
   const stage = deal.stage || deal.deal_type;
+
+  // Date conflict detection (Phase 2.9): same artist + event_date with 2+ rows
+  const conflictKey = deal.event_date ? `${deal.artist_slug}|${deal.event_date}` : null;
+  const conflictCount = conflictKey && conflictMap ? (conflictMap.get(conflictKey) || 0) : 0;
+  const hasConflict = conflictCount >= 2;
+  const isConflictHighlighted = hasConflict && highlightedConflictKey === conflictKey;
 
   const [notes, setNotes] = useState(cleanNotes(deal.notes));
   const [saveStatus, setSaveStatus] = useState(null);
@@ -735,9 +741,14 @@ function DealCard({ deal, col, artistNames, onCardClick, onStageChange, onDelete
   const dragStyle = dragSnapshot?.isDragging
     ? 'scale-[1.02] shadow-2xl shadow-black/60 ring-1 ring-indigo-500/60'
     : '';
-  const borderClass = isStale
-    ? 'border-red-600/70 ring-1 ring-red-600/40'
-    : 'border-gray-800';
+  // Conflict highlight wins over stale border when both apply (conflict is more urgent)
+  const borderClass = isConflictHighlighted
+    ? 'border-red-500 ring-2 ring-red-500/60'
+    : hasConflict
+      ? 'border-red-600/70 ring-1 ring-red-600/40'
+      : isStale
+        ? 'border-red-600/70 ring-1 ring-red-600/40'
+        : 'border-gray-800';
 
   // Whole card is the drag handle — @hello-pangea/dnd ignores
   // drag-start pointer events that originate on textarea/input, so the
@@ -779,6 +790,22 @@ function DealCard({ deal, col, artistNames, onCardClick, onStageChange, onDelete
           {artistName}
         </Link>
       </div>
+
+      {hasConflict && (
+        <button
+          type="button"
+          onMouseDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); onConflictClick && onConflictClick(isConflictHighlighted ? null : conflictKey); }}
+          className={`mb-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-semibold border transition-colors ${
+            isConflictHighlighted
+              ? 'bg-red-600 text-white border-red-500'
+              : 'bg-red-950/60 text-red-300 border-red-800/70 hover:bg-red-900/70'
+          }`}
+          title={`${conflictCount} deals on ${deal.event_date} for ${artistName}. Click to highlight conflicts.`}
+        >
+          ⚠ {conflictCount} deals on {deal.event_date}
+        </button>
+      )}
 
       {stage && (
         <span className={`text-[10px] font-semibold uppercase tracking-[0.12em] px-2 py-0.5 rounded-md inline-block mb-2.5 ${col.headerBg} ${col.headerText} ring-1 ring-current/20`}>
@@ -969,7 +996,7 @@ function SettledBody({ deal }) {
 }
 
 // ── KANBAN COLUMN ─────────────────────────────────────────────────────────────
-function KanbanColumn({ col, deals, artistNames, onCardClick, onStageChange, onDelete }) {
+function KanbanColumn({ col, deals, artistNames, onCardClick, onStageChange, onDelete, conflictMap, highlightedConflictKey, onConflictClick }) {
   // droppableId is the exact stage name ("Inquiry / Request" etc.) so the
   // onDragEnd handler can use destination.droppableId directly as the new stage.
   return (
@@ -1011,6 +1038,9 @@ function KanbanColumn({ col, deals, artistNames, onCardClick, onStageChange, onD
                       onDelete={onDelete}
                       dragProvided={dragProvided}
                       dragSnapshot={dragSnapshot}
+                      conflictMap={conflictMap}
+                      highlightedConflictKey={highlightedConflictKey}
+                      onConflictClick={onConflictClick}
                     />
                   )}
                 </Draggable>
@@ -1034,6 +1064,7 @@ export default function Pipeline() {
   const [error, setError] = useState(null);
   const [showAddDeal, setShowAddDeal] = useState(false);
   const [selectedDeal, setSelectedDeal] = useState(null);
+  const [highlightedConflictKey, setHighlightedConflictKey] = useState(null);
 
   function handleCardClick(deal) { setSelectedDeal(deal); }
 
@@ -1197,6 +1228,26 @@ export default function Pipeline() {
     ? shows.filter((s) => s.artist_slug === filterSlug)
     : shows;
 
+  // Phase 2.9 — date conflict map. Counts rows per (artist_slug, event_date)
+  // across BOTH pipeline + shows. Computed from unfiltered data so conflicts
+  // are still visible even when an artist filter is applied.
+  const conflictMap = useMemo(() => {
+    const m = new Map();
+    for (const r of pipelineDeals) {
+      if (!r.event_date) continue;
+      const k = `${r.artist_slug}|${r.event_date}`;
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    for (const r of shows) {
+      if (!r.event_date) continue;
+      const k = `${r.artist_slug}|${r.event_date}`;
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    // Drop singletons — only keep keys with 2+ rows
+    for (const [k, c] of m) if (c < 2) m.delete(k);
+    return m;
+  }, [pipelineDeals, shows]);
+
   // Assign each deal to its kanban column, sorted by sort_order ASC
   // (ties break newest-first so briefing inserts with sort_order=0 land on top)
   const columnDeals = useMemo(() => {
@@ -1317,6 +1368,9 @@ export default function Pipeline() {
                   onCardClick={handleCardClick}
                   onStageChange={changeStage}
                   onDelete={handleDelete}
+                  conflictMap={conflictMap}
+                  highlightedConflictKey={highlightedConflictKey}
+                  onConflictClick={setHighlightedConflictKey}
                 />
               ))}
             </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLog';
@@ -989,6 +989,23 @@ export default function ArtistDetail() {
 
   const yearTotal = shows.reduce((sum, s) => sum + parseFee(s.fee), 0);
 
+  // Phase 2.9 — conflict dates for this artist (event_date appearing 2+ times
+  // across shows + pipeline). Powers the inline ⚠ badge in the shows table.
+  const conflictDates = useMemo(() => {
+    const counts = new Map();
+    for (const r of shows) {
+      if (!r.event_date) continue;
+      counts.set(r.event_date, (counts.get(r.event_date) || 0) + 1);
+    }
+    for (const r of pipeline) {
+      if (!r.event_date) continue;
+      counts.set(r.event_date, (counts.get(r.event_date) || 0) + 1);
+    }
+    const out = new Map();
+    for (const [d, c] of counts) if (c >= 2) out.set(d, c);
+    return out;
+  }, [shows, pipeline]);
+
   if (!loading && !artist && !error) {
     return (
       <div className="min-h-screen flex items-center justify-center text-white" style={{ backgroundColor: '#111827' }}>
@@ -1244,17 +1261,37 @@ export default function ArtistDetail() {
                       </tr>
                     </thead>
                     <tbody>
-                      {shows.map((show) => (
-                        <tr key={show.id} onClick={() => setEditShow(show)}
-                          className="border-b border-gray-800 last:border-0 bg-emerald-950/10 hover:bg-emerald-950/20 transition-colors cursor-pointer">
-                          <td className="px-5 py-3.5 text-gray-300 whitespace-nowrap">{fmtDate(show)}</td>
-                          <td className="px-5 py-3.5 text-gray-300">{show.city}</td>
-                          <td className="px-5 py-3.5 text-white font-medium">{show.venue}</td>
-                          <td className="px-5 py-3.5 text-gray-400">{show.promoter}</td>
-                          <td className="px-5 py-3.5 text-emerald-400 font-semibold">{show.fee}</td>
-                          <td className="px-5 py-3.5"><DealBadge type={show.deal_type} /></td>
-                        </tr>
-                      ))}
+                      {shows.map((show) => {
+                        const conflictCount = show.event_date ? (conflictDates.get(show.event_date) || 0) : 0;
+                        const hasConflict = conflictCount >= 2;
+                        return (
+                          <tr key={show.id} onClick={() => setEditShow(show)}
+                            className={`border-b border-gray-800 last:border-0 transition-colors cursor-pointer ${
+                              hasConflict
+                                ? 'bg-red-950/15 hover:bg-red-950/25 ring-1 ring-inset ring-red-900/40'
+                                : 'bg-emerald-950/10 hover:bg-emerald-950/20'
+                            }`}>
+                            <td className="px-5 py-3.5 text-gray-300 whitespace-nowrap">
+                              <div className="flex items-center gap-2">
+                                <span>{fmtDate(show)}</span>
+                                {hasConflict && (
+                                  <span
+                                    title={`${conflictCount} deals on ${show.event_date} for this artist`}
+                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-950/60 text-red-300 border border-red-800/70"
+                                  >
+                                    ⚠ {conflictCount}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-5 py-3.5 text-gray-300">{show.city}</td>
+                            <td className="px-5 py-3.5 text-white font-medium">{show.venue}</td>
+                            <td className="px-5 py-3.5 text-gray-400">{show.promoter}</td>
+                            <td className="px-5 py-3.5 text-emerald-400 font-semibold">{show.fee}</td>
+                            <td className="px-5 py-3.5"><DealBadge type={show.deal_type} /></td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
