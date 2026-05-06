@@ -2,11 +2,13 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
+// Phase 2.7.5: A&R link removed — folded into Artists page as the
+// "Hip Pocket & A&R" section. /ar-inbox route still resolves (App.js)
+// for old bookmarks.
 const NAV_LINKS = [
   { to: '/',           label: 'Dashboard' },
   { to: '/pipeline',   label: 'Deal Pipeline' },
   { to: '/artists',    label: 'Artists' },
-  { to: '/ar-inbox',   label: 'A&R' },
   { to: '/rolodex',    label: 'Rolodex' },
   { to: '/financials', label: 'Financials' },
 ];

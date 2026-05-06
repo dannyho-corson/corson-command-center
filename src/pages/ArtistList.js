@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import Nav from '../components/Nav';
+import ProspectsTable from '../components/ProspectsTable';
 
 // ── TIER CONFIG ───────────────────────────────────────────────────────────────
 const tierConfig = {
@@ -288,6 +289,24 @@ export default function ArtistList() {
             )}
           </>
         )}
+
+        {/* ── HIP POCKET & A&R (Phase 2.7.5) ──────────────────────────────
+            Folded in from the killed standalone /ar-inbox tab. Uses the
+            same ProspectsTable component the legacy /ar-inbox route uses,
+            so future edits flow to both surfaces. Visual treatment is
+            intentionally muted — this is the watch list, not the active
+            booking roster above. */}
+        <section className="mt-12 pt-10 border-t border-gray-800/80 opacity-90">
+          <div className="mb-5">
+            <h3 className="text-lg font-semibold text-gray-300 tracking-tight">
+              Hip Pocket &amp; A&amp;R
+            </h3>
+            <p className="text-gray-500 text-xs mt-1">
+              Artists in development, prospects under review, unsolicited inflows.
+            </p>
+          </div>
+          <ProspectsTable compact />
+        </section>
       </main>
     </div>
   );
