@@ -10,6 +10,7 @@ import TouringGrid from './pages/TouringGrid';
 import Rolodex from './pages/Rolodex';
 import Financials from './pages/Financials';
 import ArtistShare from './pages/ArtistShare';
+import ARInbox from './pages/ARInbox';
 import Nav from './components/Nav';
 import IndustryIntelWidget from './components/IndustryIntelWidget';
 import { supabase } from './lib/supabase';
@@ -260,7 +261,7 @@ function AddToDoModal({ artists, onClose, onSaved }) {
 // Each group is a @hello-pangea/dnd Droppable; each row is a Draggable.
 // Same-group drag → reorder (save sort_order).
 // Cross-group drag → change priority AND sort_order (+ manually_prioritized=true).
-function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd, onAddClick }) {
+function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd, onAddClick, artists, onUpdated, onDeleted }) {
   const bySort = (a, b) => (a.sortOrder - b.sortOrder)
                         || (new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   const red    = items.filter(i => i.severity === 'red').sort(bySort);
@@ -304,6 +305,9 @@ function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd, onAddClic
                 group={g}
                 resolving={resolving}
                 onResolve={onResolve}
+                artists={artists}
+                onUpdated={onUpdated}
+                onDeleted={onDeleted}
               />
             ))}
           </div>
@@ -313,7 +317,7 @@ function UrgentIssuesSection({ items, resolving, onResolve, onDragEnd, onAddClic
   );
 }
 
-function UrgentIssueGroup({ group, resolving, onResolve }) {
+function UrgentIssueGroup({ group, resolving, onResolve, artists, onUpdated, onDeleted }) {
   return (
     <Droppable droppableId={group.key}>
       {(provided, snapshot) => (
@@ -341,6 +345,9 @@ function UrgentIssueGroup({ group, resolving, onResolve }) {
                   onResolve={onResolve}
                   dragProvided={dragProvided}
                   dragSnapshot={dragSnapshot}
+                  artists={artists}
+                  onUpdated={onUpdated}
+                  onDeleted={onDeleted}
                 />
               )}
             </Draggable>
@@ -352,7 +359,55 @@ function UrgentIssueGroup({ group, resolving, onResolve }) {
   );
 }
 
-function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, dragSnapshot }) {
+function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, dragSnapshot, artists, onUpdated, onDeleted }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [editErr, setEditErr] = useState(null);
+
+  function startEdit() {
+    setForm({
+      task: item.task || item.issue || '',
+      why: item.why || '',
+      next_step: item.nextStep || '',
+      action_type: item.actionType || 'REPLY',
+      domain: item.domain || 'DEAL',
+      priority: item.priority || 'Medium',
+      artist_slug: item.artistSlug || '',
+    });
+    setEditErr(null);
+    setEditing(true);
+  }
+  function cancelEdit() { setEditing(false); setForm(null); setEditErr(null); }
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function saveEdit() {
+    if (!form.task.trim()) { setEditErr('Task is required.'); return; }
+    setSaving(true); setEditErr(null);
+    const patch = {
+      task: form.task.trim(),
+      issue: form.task.trim(),
+      why: form.why.trim() || null,
+      next_step: form.next_step.trim() || null,
+      action_type: form.action_type,
+      domain: form.domain,
+      priority: form.priority,
+      artist_slug: form.artist_slug || null,
+    };
+    const { data, error } = await supabase.from('urgent_issues').update(patch).eq('id', item.id).select().single();
+    setSaving(false);
+    if (error) { setEditErr(error.message); return; }
+    onUpdated && onUpdated(data);
+    setEditing(false);
+  }
+
+  async function deleteRow() {
+    if (!window.confirm(`Delete this to-do?\n\n${item.task || item.issue}\n\nThis cannot be undone.`)) return;
+    const { error } = await supabase.from('urgent_issues').delete().eq('id', item.id);
+    if (error) { alert(`Delete failed: ${error.message}`); return; }
+    onDeleted && onDeleted(item.id);
+  }
+
   const rowBg = item.severity === 'red' ? 'bg-red-950/20'
               : item.severity === 'green' ? 'bg-emerald-950/15'
               : 'bg-yellow-950/10';
@@ -378,7 +433,8 @@ function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, drag
       {...(dragProvided?.draggableProps || {})}
       {...(dragProvided?.dragHandleProps || {})}
       style={dragProvided?.draggableProps?.style}
-      className={`flex items-start gap-4 px-5 py-4 ${isLast ? '' : 'border-b border-gray-800/60'} ${rowBg} hover:bg-gray-800/30 transition-all duration-200 ease-out ${dragStyle} select-none cursor-grab active:cursor-grabbing`}
+      onClick={editing ? undefined : startEdit}
+      className={`flex items-start gap-4 px-5 py-4 ${isLast ? '' : 'border-b border-gray-800/60'} ${rowBg} hover:bg-gray-800/30 transition-all duration-200 ease-out ${dragStyle} select-none ${editing ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
     >
       <div className={`w-1 self-stretch rounded-full flex-shrink-0 ${rail}`} />
       <div className="flex flex-col gap-1 flex-1 min-w-0">
@@ -416,7 +472,7 @@ function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, drag
         </div>
 
         {/* Body: 3-line task-shaped if task exists, else single-line legacy issue */}
-        {item.task ? (
+        {!editing && (item.task ? (
           <>
             <p className="text-white text-sm font-semibold leading-snug mt-0.5">{item.task}</p>
             {item.why && (
@@ -430,15 +486,88 @@ function UrgentIssueRow({ item, isLast, resolving, onResolve, dragProvided, drag
           </>
         ) : (
           <p className="text-gray-400 text-sm leading-relaxed">{item.issue}</p>
+        ))}
+
+        {/* Phase 2.2.5 — Inline edit form */}
+        {editing && form && (
+          <div className="mt-2 space-y-2.5" onClick={e => e.stopPropagation()}>
+            <div>
+              <label className="block text-gray-500 text-[10px] uppercase tracking-[0.14em] mb-1">Task <span className="text-red-400">*</span></label>
+              <input type="text" value={form.task} onChange={e => set('task', e.target.value)} autoFocus
+                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-[10px] uppercase tracking-[0.14em] mb-1">Why</label>
+              <textarea value={form.why} onChange={e => set('why', e.target.value)} rows={2}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 resize-y" />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-[10px] uppercase tracking-[0.14em] mb-1">Next step</label>
+              <textarea value={form.next_step} onChange={e => set('next_step', e.target.value)} rows={2}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 resize-y" />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-gray-500 text-[10px] uppercase tracking-[0.14em] mb-1">Action</label>
+                <select value={form.action_type} onChange={e => set('action_type', e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500">
+                  {ACTION_TYPES.map(a => <option key={a} value={a}>{ACTION_ICONS[a]} {a}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-gray-500 text-[10px] uppercase tracking-[0.14em] mb-1">Domain</label>
+                <select value={form.domain} onChange={e => set('domain', e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500">
+                  {DOMAINS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-gray-500 text-[10px] uppercase tracking-[0.14em] mb-1">Priority</label>
+                <select value={form.priority} onChange={e => set('priority', e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500">
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-gray-500 text-[10px] uppercase tracking-[0.14em] mb-1">Artist <span className="text-gray-700">(optional)</span></label>
+              <select value={form.artist_slug} onChange={e => set('artist_slug', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500">
+                <option value="">— no artist —</option>
+                {(artists || []).map(a => <option key={a.slug} value={a.slug}>{a.name}</option>)}
+              </select>
+            </div>
+            {editErr && <p className="text-red-400 text-xs">{editErr}</p>}
+            <div className="flex items-center justify-between pt-1">
+              <button type="button" onClick={deleteRow}
+                className="text-red-400 hover:text-red-300 text-[11px] uppercase tracking-wider transition-colors">
+                Delete
+              </button>
+              <div className="flex gap-2">
+                <button type="button" onClick={cancelEdit}
+                  className="px-3 py-1.5 text-xs text-gray-400 hover:text-white transition-colors">
+                  Cancel
+                </button>
+                <button type="button" onClick={saveEdit} disabled={saving}
+                  className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 text-white rounded font-semibold transition-colors">
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
-      <button
-        onClick={onResolveClick}
-        disabled={resolving === item.id}
-        className={`flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${btnClass}`}
-      >
-        {resolving === item.id ? '…' : 'Resolve'}
-      </button>
+      {!editing && (
+        <button
+          onClick={onResolveClick}
+          disabled={resolving === item.id}
+          className={`flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${btnClass}`}
+        >
+          {resolving === item.id ? '…' : 'Resolve'}
+        </button>
+      )}
     </div>
   );
 }
@@ -989,6 +1118,9 @@ function Dashboard() {
             onResolve={handleResolve}
             onDragEnd={handleDragEnd}
             onAddClick={() => setShowAddTodo(true)}
+            artists={rosterArtists}
+            onUpdated={(updatedRow) => setUrgentRows(prev => prev.map(r => r.id === updatedRow.id ? updatedRow : r))}
+            onDeleted={(id) => setUrgentRows(prev => prev.filter(r => r.id !== id))}
           />
         </div>
 
@@ -1045,6 +1177,7 @@ function App() {
         <Route path="/artists/:slug/targets" element={<TargetList />} />
         <Route path="/artists/:slug/grid" element={<TouringGrid />} />
         <Route path="/pipeline" element={<Pipeline />} />
+        <Route path="/ar-inbox" element={<ARInbox />} />
         <Route path="/rolodex" element={<Rolodex />} />
         <Route path="/financials" element={<Financials />} />
         <Route path="/share/:slug" element={<ArtistShare />} />

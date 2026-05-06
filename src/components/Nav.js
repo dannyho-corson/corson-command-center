@@ -6,6 +6,7 @@ const NAV_LINKS = [
   { to: '/',           label: 'Dashboard' },
   { to: '/pipeline',   label: 'Deal Pipeline' },
   { to: '/artists',    label: 'Artists' },
+  { to: '/ar-inbox',   label: 'A&R' },
   { to: '/rolodex',    label: 'Rolodex' },
   { to: '/financials', label: 'Financials' },
 ];
